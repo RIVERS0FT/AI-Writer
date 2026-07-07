@@ -43,8 +43,7 @@ export function normalizeLegacyChapterText(value: string): string {
     if (character === ">" && insideTag) {
       const name = tag.trim().toLowerCase();
       if (
-        name === "br" ||
-        name === "br/" ||
+        name.startsWith("br") ||
         name === "/p" ||
         name === "/div" ||
         name === "/li" ||
@@ -61,6 +60,8 @@ export function normalizeLegacyChapterText(value: string): string {
     if (insideTag) tag += character;
     else result += character;
   }
+
+  if (insideTag) result += `<${tag}`;
 
   return decodeCommonEntities(result)
     .replace(/\u00a0/g, " ")
