@@ -1,5 +1,6 @@
 import {
-  createHtmlContentDocument,
+  createPlainTextContentDocument,
+  normalizeLegacyChapterText,
   type Chapter,
   type GenerationJob,
   type NovelProject,
@@ -9,32 +10,15 @@ import { ChapterEditor } from "@ai-writer/editor";
 import type { PlatformService } from "@ai-writer/platform";
 import type { ModelProfile, ProviderConfig } from "@ai-writer/providers";
 import { createProjectInputSchema } from "@ai-writer/schemas";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProviderSettings } from "./ProviderSettings";
 
 export interface AppShellProps {
   platform: PlatformService;
 }
 
-const emptyEditorContent =
-  "<h2>请选择章节</h2><p>在左侧创建卷和章节后开始写作。</p>";
-
+const emptyEditorContent = "请选择章节\n\n在左侧创建卷和章节后开始写作。";
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
 
 function generationStatusLabel(status: GenerationJob["status"]): string {
   const labels: Record<GenerationJob["status"], string> = {
@@ -74,19 +58,14 @@ export function AppShell({ platform }: AppShellProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeProvider, setActiveProvider] = useState<ProviderConfig>();
   const [activeProfile, setActiveProfile] = useState<ModelProfile>();
-  const [editorContent, setEditorContent] = useState(emptyEditorContent);
-  const [editorPlainText, setEditorPlainText] = useState("");
+  const [editorText, setEditorText] = useState(emptyEditorContent);
   const [streamText, setStreamText] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string>();
   const [usageText, setUsageText] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [versionNotice, setVersionNotice] = useState("");
 
-  const lastSavedRef = useRef({
-    chapterId: "",
-    html: emptyEditorContent,
-    text: "",
-  });
+  const lastSavedRef = useRef({ chapterId: "", text: emptyEditorContent });
   const generatedTextRef = useRef("");
   const cancelRequestedRef = useRef(false);
 
@@ -96,9 +75,7 @@ export function AppShell({ platform }: AppShellProps) {
   );
 
   const selectedChapter = useMemo(
-    () =>
-      chapters.find((chapter) => chapter.id === selectedChapterId) ??
-      chapters[0],
+    () => chapters.find((chapter) => chapter.id === selectedChapterId) ?? chapters[0],
     [chapters, selectedChapterId],
   );
 
@@ -118,12 +95,11 @@ export function AppShell({ platform }: AppShellProps) {
     try {
       const nextProjects = await platform.projects.list();
       setProjects(nextProjects);
-      setSelectedId((current) => {
-        if (current && nextProjects.some((project) => project.id === current)) {
-          return current;
-        }
-        return nextProjects[0]?.id;
-      });
+      setSelectedId((current) =>
+        current && nextProjects.some((project) => project.id === current)
+          ? current
+          : nextProjects[0]?.id,
+      );
       setError(undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -154,13 +130,9 @@ export function AppShell({ platform }: AppShellProps) {
       setChapters(nextChapters);
       setSelectedChapterId((current) => {
         const candidate = preferredChapterId ?? current;
-        if (
-          candidate &&
-          nextChapters.some((chapter) => chapter.id === candidate)
-        ) {
-          return candidate;
-        }
-        return nextChapters[0]?.id;
+        return candidate && nextChapters.some((chapter) => chapter.id === candidate)
+          ? candidate
+          : nextChapters[0]?.id;
       });
     },
     [platform],
@@ -168,8 +140,7 @@ export function AppShell({ platform }: AppShellProps) {
 
   const refreshJobs = useCallback(
     async (projectId: string) => {
-      const jobs = await platform.generationJobs.listRecent(projectId, 12);
-      setRecentJobs(jobs);
+      setRecentJobs(await platform.generationJobs.listRecent(projectId, 12));
     },
     [platform],
   );
@@ -189,7 +160,6 @@ export function AppShell({ platform }: AppShellProps) {
       setSelectedChapterId(undefined);
       return;
     }
-
     void (async () => {
       try {
         await platform.generationJobs.markInterrupted(selectedProject.id);
@@ -205,35 +175,25 @@ export function AppShell({ platform }: AppShellProps) {
 
   useEffect(() => {
     if (!selectedChapter) {
-      setEditorContent(emptyEditorContent);
-      setEditorPlainText("");
-      lastSavedRef.current = {
-        chapterId: "",
-        html: emptyEditorContent,
-        text: "",
-      };
+      setEditorText(emptyEditorContent);
+      lastSavedRef.current = { chapterId: "", text: emptyEditorContent };
       setSaveState("idle");
       return;
     }
-
-    setEditorContent(selectedChapter.contentMarkdown || emptyEditorContent);
-    setEditorPlainText(selectedChapter.plainText);
-    lastSavedRef.current = {
-      chapterId: selectedChapter.id,
-      html: selectedChapter.contentMarkdown || emptyEditorContent,
-      text: selectedChapter.plainText,
-    };
+    const text = normalizeLegacyChapterText(
+      selectedChapter.plainText || selectedChapter.contentMarkdown || "",
+    );
+    setEditorText(text);
+    lastSavedRef.current = { chapterId: selectedChapter.id, text };
     setSaveState("saved");
     setVersionNotice("");
   }, [selectedChapter]);
 
   useEffect(() => {
     if (!selectedChapter) return;
-    const lastSaved = lastSavedRef.current;
     if (
-      lastSaved.chapterId === selectedChapter.id &&
-      lastSaved.html === editorContent &&
-      lastSaved.text === editorPlainText
+      lastSavedRef.current.chapterId === selectedChapter.id &&
+      lastSavedRef.current.text === editorText
     ) {
       return;
     }
@@ -244,24 +204,16 @@ export function AppShell({ platform }: AppShellProps) {
       void platform.contents
         .saveChapterContent({
           chapterId: selectedChapter.id,
-          contentJson: createHtmlContentDocument(editorContent),
-          contentMarkdown: editorContent,
-          plainText: editorPlainText,
-          ...(selectedChapter.summary
-            ? { summary: selectedChapter.summary }
-            : {}),
+          contentJson: createPlainTextContentDocument(editorText),
+          contentMarkdown: editorText,
+          plainText: editorText,
+          ...(selectedChapter.summary ? { summary: selectedChapter.summary } : {}),
         })
         .then((updated) => {
           setChapters((current) =>
-            current.map((chapter) =>
-              chapter.id === updated.id ? updated : chapter,
-            ),
+            current.map((chapter) => (chapter.id === updated.id ? updated : chapter)),
           );
-          lastSavedRef.current = {
-            chapterId: updated.id,
-            html: updated.contentMarkdown,
-            text: updated.plainText,
-          };
+          lastSavedRef.current = { chapterId: updated.id, text: updated.plainText };
           setSaveState("saved");
         })
         .catch((reason: unknown) => {
@@ -271,12 +223,7 @@ export function AppShell({ platform }: AppShellProps) {
     }, 900);
 
     return () => globalThis.clearTimeout(timer);
-  }, [
-    editorContent,
-    editorPlainText,
-    platform,
-    selectedChapter,
-  ]);
+  }, [editorText, platform, selectedChapter]);
 
   async function createProject() {
     setCreating(true);
@@ -342,30 +289,23 @@ export function AppShell({ platform }: AppShellProps) {
   async function saveVersion() {
     if (!selectedChapter) return;
     try {
+      const document = createPlainTextContentDocument(editorText);
       const updated = await platform.contents.saveChapterContent({
         chapterId: selectedChapter.id,
-        contentJson: createHtmlContentDocument(editorContent),
-        contentMarkdown: editorContent,
-        plainText: editorPlainText,
-        ...(selectedChapter.summary
-          ? { summary: selectedChapter.summary }
-          : {}),
+        contentJson: document,
+        contentMarkdown: editorText,
+        plainText: editorText,
+        ...(selectedChapter.summary ? { summary: selectedChapter.summary } : {}),
       });
-      lastSavedRef.current = {
-        chapterId: updated.id,
-        html: updated.contentMarkdown,
-        text: updated.plainText,
-      };
       setChapters((current) =>
-        current.map((chapter) =>
-          chapter.id === updated.id ? updated : chapter,
-        ),
+        current.map((chapter) => (chapter.id === updated.id ? updated : chapter)),
       );
+      lastSavedRef.current = { chapterId: updated.id, text: updated.plainText };
       const version = await platform.contents.createChapterVersion({
         chapterId: selectedChapter.id,
-        contentJson: createHtmlContentDocument(editorContent),
-        contentMarkdown: editorContent,
-        plainText: editorPlainText,
+        contentJson: document,
+        contentMarkdown: editorText,
+        plainText: editorText,
         changeType: "manual",
         changeReason: "用户手动保存版本",
       });
@@ -394,20 +334,14 @@ export function AppShell({ platform }: AppShellProps) {
       setError("请先配置 Provider 和模型档案");
       return;
     }
-    if (!activeProvider.apiKeyRef) {
+    if (!activeProvider.apiKeyRef || !platform.secureStorage.isUnlocked()) {
       setSettingsOpen(true);
-      setError("Provider 没有 API Key 引用，请重新保存配置");
-      return;
-    }
-    if (!platform.secureStorage.isUnlocked()) {
-      setSettingsOpen(true);
-      setError("请先在模型服务设置中解锁密钥库");
+      setError("请先在模型服务设置中保存密钥并解锁密钥库");
       return;
     }
 
     const taskId = crypto.randomUUID();
     setActiveTaskId(taskId);
-
     try {
       await platform.generationJobs.create({
         id: taskId,
@@ -425,19 +359,18 @@ export function AppShell({ platform }: AppShellProps) {
 
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
-
       await platform.providerRuntime.generate(
         {
           taskId,
           provider: activeProvider,
           profile: activeProfile,
           systemPrompt:
-            "你是专业小说写作助手。保持人物、世界观和叙事视角一致，只输出续写正文。",
+            "你是专业小说写作助手。保持人物、世界观和叙事视角一致，只输出纯文本续写正文，不使用 Markdown 或 HTML。",
           userPrompt: [
             `请为小说《${selectedProject.title}》的《${selectedChapter.title}》续写正文。`,
-            "保持自然衔接，输出约 500 字。",
+            "保持自然衔接，输出约 500 字纯文本。",
             "当前章节末尾内容：",
-            editorPlainText.slice(-4_000),
+            editorText.slice(-4_000),
           ].join("\n"),
         },
         (event) => {
@@ -453,8 +386,8 @@ export function AppShell({ platform }: AppShellProps) {
         },
       );
 
-      const generatedText = generatedTextRef.current;
-      if (generatedText.trim()) {
+      const generatedText = generatedTextRef.current.trim();
+      if (generatedText) {
         await platform.generationJobs.replaceOutput(taskId, generatedText);
       }
       await platform.generationJobs.update(taskId, {
@@ -465,44 +398,25 @@ export function AppShell({ platform }: AppShellProps) {
         errorCode: null,
         errorMessage: null,
       });
-
-      if (generatedText.trim()) {
-        const safe = escapeHtml(generatedText).replaceAll("\n", "<br />");
-        const separator =
-          editorContent.trim().length > 0 ? "<p><br /></p>" : "";
-        setEditorContent(
-          (current) =>
-            `${current}${separator}<p data-ai-generated="true">${safe}</p>`,
-        );
-        setEditorPlainText((current) =>
-          current.trim()
-            ? `${current}\n\n${generatedText}`
-            : generatedText,
-        );
+      if (generatedText) {
+        setEditorText((current) => (current.trim() ? `${current.trimEnd()}\n\n${generatedText}` : generatedText));
       }
-
-      const input = inputTokens ?? 0;
-      const output = outputTokens ?? 0;
       setUsageText(
-        input || output
-          ? `Token：${input} 输入 / ${output} 输出`
+        inputTokens || outputTokens
+          ? `Token：${inputTokens ?? 0} 输入 / ${outputTokens ?? 0} 输出`
           : "生成完成",
       );
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason);
-      const generatedText = generatedTextRef.current;
-      if (generatedText.trim()) {
-        await platform.generationJobs
-          .replaceOutput(taskId, generatedText)
-          .catch(() => undefined);
+      const generatedText = generatedTextRef.current.trim();
+      if (generatedText) {
+        await platform.generationJobs.replaceOutput(taskId, generatedText).catch(() => undefined);
       }
       await platform.generationJobs
         .update(taskId, {
           status: cancelRequestedRef.current ? "cancelled" : "failed",
           progress: 1,
-          errorCode: cancelRequestedRef.current
-            ? "user_cancelled"
-            : "generation_failed",
+          errorCode: cancelRequestedRef.current ? "user_cancelled" : "generation_failed",
           errorMessage: message,
         })
         .catch(() => undefined);
@@ -510,15 +424,16 @@ export function AppShell({ platform }: AppShellProps) {
       else setUsageText("生成已取消，现有输出可从任务记录恢复");
     } finally {
       setActiveTaskId(undefined);
-      if (selectedProject) await refreshJobs(selectedProject.id);
+      await refreshJobs(selectedProject.id);
     }
   }
 
   async function cancelGeneration() {
     if (!activeTaskId) return;
     cancelRequestedRef.current = true;
-    const cancelled = await platform.providerRuntime.cancel(activeTaskId);
-    if (cancelled) setUsageText("正在取消生成…");
+    if (await platform.providerRuntime.cancel(activeTaskId)) {
+      setUsageText("正在取消生成…");
+    }
   }
 
   async function restoreJob(job: GenerationJob) {
@@ -528,21 +443,15 @@ export function AppShell({ platform }: AppShellProps) {
     }
     try {
       const output = await platform.generationJobs.getOutput(job.id);
-      if (!output?.content.trim()) {
-        setError("该任务没有可恢复的输出");
-        return;
-      }
-      const safe = escapeHtml(output.content).replaceAll("\n", "<br />");
-      const nextHtml = `${editorContent}<p><br /></p><p data-recovered-job="${job.id}">${safe}</p>`;
-      const nextText = editorPlainText.trim()
-        ? `${editorPlainText}\n\n${output.content}`
-        : output.content;
-      setEditorContent(nextHtml);
-      setEditorPlainText(nextText);
+      if (!output?.content.trim()) throw new Error("该任务没有可恢复的输出");
+      const nextText = editorText.trim()
+        ? `${editorText.trimEnd()}\n\n${output.content.trim()}`
+        : output.content.trim();
+      setEditorText(nextText);
       await platform.contents.createChapterVersion({
         chapterId: selectedChapter.id,
-        contentJson: createHtmlContentDocument(nextHtml),
-        contentMarkdown: nextHtml,
+        contentJson: createPlainTextContentDocument(nextText),
+        contentMarkdown: nextText,
         plainText: nextText,
         changeType: "recovery",
         changeReason: `恢复生成任务 ${job.id}`,
@@ -570,18 +479,13 @@ export function AppShell({ platform }: AppShellProps) {
         <div>
           <strong>AI-Writer</strong>
           <span className="topbar__runtime">
-            {platform.runtime.platform === "native" ? "Tauri" : "Web"} ·{" "}
-            {platform.runtime.version}
+            {platform.runtime.platform === "native" ? "Tauri" : "Web"} · {platform.runtime.version}
           </span>
         </div>
         <div className="topbar__actions">
           <span className="status-dot" aria-hidden="true" />
-          <span>本地优先</span>
-          <button
-            type="button"
-            className="topbar__button"
-            onClick={() => setSettingsOpen(true)}
-          >
+          <span>纯文本 · 本地优先</span>
+          <button type="button" className="topbar__button" onClick={() => setSettingsOpen(true)}>
             模型设置
           </button>
         </div>
@@ -591,61 +495,40 @@ export function AppShell({ platform }: AppShellProps) {
         <aside className="sidebar">
           <div className="panel-heading">
             <span>小说项目</span>
-            <button
-              type="button"
-              onClick={() => void createProject()}
-              disabled={creating}
-            >
+            <button type="button" onClick={() => void createProject()} disabled={creating}>
               {creating ? "…" : "+"}
             </button>
           </div>
-
           {loading ? <p className="muted">正在载入项目…</p> : null}
           {error ? <p className="error-text">{error}</p> : null}
-
           <nav className="project-list" aria-label="小说项目">
             {projects.map((project) => (
               <button
                 type="button"
-                className={
-                  project.id === selectedProject?.id
-                    ? "project-item active"
-                    : "project-item"
-                }
+                className={project.id === selectedProject?.id ? "project-item active" : "project-item"}
                 key={project.id}
                 onClick={() => setSelectedId(project.id)}
               >
                 <span>{project.title}</span>
-                <small>
-                  {project.status === "planning" ? "规划中" : "创作中"}
-                </small>
+                <small>{project.status === "planning" ? "规划中" : "创作中"}</small>
               </button>
             ))}
           </nav>
-
           {!loading && projects.length === 0 ? (
             <div className="empty-state">
               <p>还没有小说项目。</p>
-              <button type="button" onClick={() => void createProject()}>
-                创建第一个项目
-              </button>
+              <button type="button" onClick={() => void createProject()}>创建第一个项目</button>
             </div>
           ) : null}
-
           {selectedProject ? (
             <section className="story-structure">
               <div className="story-structure__header">
                 <span>卷与章节</span>
                 <div>
-                  <button type="button" onClick={() => void createVolume()}>
-                    + 卷
-                  </button>
-                  <button type="button" onClick={() => void createChapter()}>
-                    + 章
-                  </button>
+                  <button type="button" onClick={() => void createVolume()}>+ 卷</button>
+                  <button type="button" onClick={() => void createChapter()}>+ 章</button>
                 </div>
               </div>
-
               {volumes.map((volume) => (
                 <div className="volume-node" key={volume.id}>
                   <strong>{volume.title}</strong>
@@ -654,11 +537,7 @@ export function AppShell({ platform }: AppShellProps) {
                       <button
                         type="button"
                         key={chapter.id}
-                        className={
-                          chapter.id === selectedChapter?.id
-                            ? "chapter-item active"
-                            : "chapter-item"
-                        }
+                        className={chapter.id === selectedChapter?.id ? "chapter-item active" : "chapter-item"}
                         onClick={() => setSelectedChapterId(chapter.id)}
                       >
                         <span>{chapter.title}</span>
@@ -668,28 +547,21 @@ export function AppShell({ platform }: AppShellProps) {
                   </div>
                 </div>
               ))}
-
               {(chaptersByVolume.get("unassigned") ?? []).length > 0 ? (
                 <div className="volume-node">
                   <strong>未分卷</strong>
                   <div className="chapter-list">
-                    {(chaptersByVolume.get("unassigned") ?? []).map(
-                      (chapter) => (
-                        <button
-                          type="button"
-                          key={chapter.id}
-                          className={
-                            chapter.id === selectedChapter?.id
-                              ? "chapter-item active"
-                              : "chapter-item"
-                          }
-                          onClick={() => setSelectedChapterId(chapter.id)}
-                        >
-                          <span>{chapter.title}</span>
-                          <small>{chapter.status}</small>
-                        </button>
-                      ),
-                    )}
+                    {(chaptersByVolume.get("unassigned") ?? []).map((chapter) => (
+                      <button
+                        type="button"
+                        key={chapter.id}
+                        className={chapter.id === selectedChapter?.id ? "chapter-item active" : "chapter-item"}
+                        onClick={() => setSelectedChapterId(chapter.id)}
+                      >
+                        <span>{chapter.title}</span>
+                        <small>{chapter.status}</small>
+                      </button>
+                    ))}
                   </div>
                 </div>
               ) : null}
@@ -700,60 +572,24 @@ export function AppShell({ platform }: AppShellProps) {
         <main className="editor-panel">
           <div className="editor-toolbar">
             <div>
-              <h1>
-                {selectedChapter?.title ??
-                  selectedProject?.title ??
-                  "欢迎使用 AI-Writer"}
-              </h1>
-              <p>
-                {selectedProject
-                  ? `${selectedProject.title} · ${
-                      selectedProject.genre || "未设置题材"
-                    }`
-                  : "请创建小说项目"}
-              </p>
+              <h1>{selectedChapter?.title ?? selectedProject?.title ?? "欢迎使用 AI-Writer"}</h1>
+              <p>{selectedProject ? `${selectedProject.title} · ${selectedProject.genre || "未设置题材"}` : "请创建小说项目"}</p>
             </div>
             <div className="editor-toolbar__buttons">
-              <button
-                type="button"
-                disabled={!selectedChapter}
-                onClick={() => void saveVersion()}
-              >
-                保存版本
-              </button>
+              <button type="button" disabled={!selectedChapter} onClick={() => void saveVersion()}>保存版本</button>
               {activeTaskId ? (
-                <button
-                  type="button"
-                  className="danger-button"
-                  onClick={() => void cancelGeneration()}
-                >
-                  取消生成
-                </button>
+                <button type="button" className="danger-button" onClick={() => void cancelGeneration()}>取消生成</button>
               ) : (
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => void startGeneration()}
-                >
-                  AI 续写
-                </button>
+                <button type="button" className="primary-button" onClick={() => void startGeneration()}>AI 续写</button>
               )}
             </div>
           </div>
-
           <section className="editor-card">
-            <ChapterEditor
-              content={editorContent}
-              onChange={(html, text) => {
-                setEditorContent(html);
-                setEditorPlainText(text);
-              }}
-            />
+            <ChapterEditor content={editorText} onChange={(text) => setEditorText(text)} />
           </section>
-
           <footer className="editor-footer">
             <span>{saveLabel}</span>
-            <span>{versionNotice || usageText || "记忆上下文：0 条"}</span>
+            <span>{versionNotice || usageText || `字数：${editorText.trim().length}`}</span>
           </footer>
         </main>
 
@@ -765,83 +601,29 @@ export function AppShell({ platform }: AppShellProps) {
               <span>{activeProfile?.model ?? "请打开模型设置"}</span>
             </div>
             <div className="action-grid">
-              <button
-                type="button"
-                onClick={() => void startGeneration()}
-                disabled={Boolean(activeTaskId)}
-              >
-                生成场景
-              </button>
-              <button type="button">改写选区</button>
+              <button type="button" onClick={() => void startGeneration()} disabled={Boolean(activeTaskId)}>生成场景</button>
+              <button type="button">改写文本</button>
               <button type="button">扩写</button>
               <button type="button">一致性检查</button>
             </div>
-            {streamText ? (
-              <div className="stream-preview">
-                <span>实时输出</span>
-                <p>{streamText}</p>
-              </div>
-            ) : null}
+            {streamText ? <div className="stream-preview"><span>实时输出</span><p>{streamText}</p></div> : null}
           </section>
-
           <section>
             <h2>最近生成任务</h2>
             <div className="job-list">
-              {recentJobs.length === 0 ? (
-                <p className="muted">暂无生成任务</p>
-              ) : (
-                recentJobs.map((job) => (
-                  <article className="job-item" key={job.id}>
-                    <div>
-                      <strong>{generationStatusLabel(job.status)}</strong>
-                      <time>{formatTime(job.updatedAt)}</time>
-                    </div>
-                    <p>
-                      {job.errorMessage ??
-                        `${job.inputTokens ?? 0} 输入 / ${
-                          job.outputTokens ?? 0
-                        } 输出`}
-                    </p>
-                    {job.status !== "generating" ? (
-                      <button
-                        type="button"
-                        onClick={() => void restoreJob(job)}
-                      >
-                        恢复输出
-                      </button>
-                    ) : null}
-                  </article>
-                ))
-              )}
+              {recentJobs.length === 0 ? <p className="muted">暂无生成任务</p> : recentJobs.map((job) => (
+                <article className="job-item" key={job.id}>
+                  <div><strong>{generationStatusLabel(job.status)}</strong><time>{formatTime(job.updatedAt)}</time></div>
+                  <p>{job.errorMessage ?? `${job.inputTokens ?? 0} 输入 / ${job.outputTokens ?? 0} 输出`}</p>
+                  {job.status !== "generating" ? <button type="button" onClick={() => void restoreJob(job)}>恢复输出</button> : null}
+                </article>
+              ))}
             </div>
           </section>
-
-          <section>
-            <h2>项目记忆</h2>
-            <ul className="memory-list">
-              <li>
-                <span>权威设定</span>
-                <strong>0</strong>
-              </li>
-              <li>
-                <span>人物状态</span>
-                <strong>0</strong>
-              </li>
-              <li>
-                <span>剧情事件</span>
-                <strong>0</strong>
-              </li>
-              <li>
-                <span>待回收伏笔</span>
-                <strong>0</strong>
-              </li>
-            </ul>
-          </section>
-
           <section>
             <h2>基础能力</h2>
             <ul className="capability-list">
-              <li className="ready">卷与章节持久化</li>
+              <li className="ready">纯文本章节编辑</li>
               <li className="ready">章节自动保存</li>
               <li className="ready">章节历史版本</li>
               <li className="ready">生成任务恢复</li>
