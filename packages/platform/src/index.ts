@@ -86,9 +86,20 @@ export interface KnowledgeRepository {
   deleteOutlineNode(id: string): Promise<void>;
 }
 
+export type CreateGenerationJobRequest = Omit<
+  CreateGenerationJobInput,
+  "instruction" | "pipelineVersion" | "promptSetVersion" | "options"
+> &
+  Partial<
+    Pick<
+      CreateGenerationJobInput,
+      "instruction" | "pipelineVersion" | "promptSetVersion" | "options"
+    >
+  >;
+
 export interface GenerationJobRepository {
   listRecent(projectId: string, limit?: number): Promise<GenerationJob[]>;
-  create(input: CreateGenerationJobInput): Promise<GenerationJob>;
+  create(input: CreateGenerationJobRequest): Promise<GenerationJob>;
   update(id: string, input: UpdateGenerationJobInput): Promise<GenerationJob>;
   replaceOutput(jobId: string, content: string): Promise<GenerationOutput>;
   getOutput(jobId: string): Promise<GenerationOutput | undefined>;
