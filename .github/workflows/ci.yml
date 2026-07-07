@@ -23,7 +23,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: lts/*
-          cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -37,7 +36,28 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Typecheck
-        run: pnpm typecheck
+        id: typecheck
+        shell: bash
+        run: |
+          set +e
+          pnpm typecheck > typecheck.log 2>&1
+          status=$?
+          cat typecheck.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload typecheck diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typecheck-diagnostics
+          path: typecheck.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce typecheck result
+        if: steps.typecheck.outputs.status != '0'
+        run: exit 1
 
       - name: Test
         run: pnpm test
@@ -46,4 +66,25 @@ jobs:
         run: pnpm --filter @ai-writer/web build
 
       - name: Check Rust
-        run: cargo check --manifest-path apps/native/src-tauri/Cargo.toml
+        id: rustcheck
+        shell: bash
+        run: |
+          set +e
+          cargo check --manifest-path apps/native/src-tauri/Cargo.toml > rust-check.log 2>&1
+          status=$?
+          cat rust-check.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload Rust check diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-check-diagnostics
+          path: rust-check.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce Rust check result
+        if: steps.rustcheck.outputs.status != '0'
+        run: exit 1

@@ -1,6 +1,10 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
 const tauriHost = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({

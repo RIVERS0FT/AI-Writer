@@ -1,8 +1,15 @@
 import type { NovelProject } from "@ai-writer/core";
-import type { PlatformService, ProjectRepository, RuntimeInfo } from "@ai-writer/platform";
+import type {
+  PlatformService,
+  ProjectRepository,
+  ProviderRuntimeService,
+  RuntimeInfo,
+  SecureStorageService,
+} from "@ai-writer/platform";
 import { createProjectInputSchema, type CreateProjectInput } from "@ai-writer/schemas";
 import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
+import { createProviderRepository } from "./provider-repository";
 
 interface ProjectRow {
   id: string;
@@ -26,9 +33,9 @@ function mapProject(row: ProjectRow): NovelProject {
   };
 }
 
-async function createRepository(): Promise<ProjectRepository> {
-  const database = await Database.load("sqlite:ai-writer.db");
-
+async function createProjectRepository(
+  database: Database,
+): Promise<ProjectRepository> {
   return {
     async list() {
       const rows = await database.select<ProjectRow[]>(
@@ -73,11 +80,25 @@ async function createRepository(): Promise<ProjectRepository> {
   };
 }
 
-export async function createNativePlatform(): Promise<PlatformService> {
+export interface NativePlatformDependencies {
+  secureStorage: SecureStorageService;
+  providerRuntime: ProviderRuntimeService;
+}
+
+export async function createNativePlatform(
+  dependencies: NativePlatformDependencies,
+): Promise<PlatformService> {
+  const database = await Database.load("sqlite:ai-writer.db");
   const [runtime, projects] = await Promise.all([
     invoke<RuntimeInfo>("runtime_info"),
-    createRepository(),
+    createProjectRepository(database),
   ]);
 
-  return { runtime, projects };
+  return {
+    runtime,
+    projects,
+    providers: createProviderRepository(database),
+    secureStorage: dependencies.secureStorage,
+    providerRuntime: dependencies.providerRuntime,
+  };
 }

@@ -38,6 +38,7 @@ pub fn run() {
                 .add_migrations("sqlite:ai-writer.db", migrations)
                 .build(),
         )
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let salt_path = app
                 .path()

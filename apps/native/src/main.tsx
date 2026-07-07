@@ -3,13 +3,19 @@ import "@ai-writer/ui/styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createNativePlatform } from "./platform";
+import { createProviderRuntime } from "./provider-runtime";
+import { createSecureStorage } from "./secure-storage";
 
 const element = document.getElementById("root");
 if (!element) throw new Error("Root element not found");
 
 const root = createRoot(element);
+const secureStorage = createSecureStorage();
 
-createNativePlatform()
+createNativePlatform({
+  secureStorage,
+  providerRuntime: createProviderRuntime(secureStorage),
+})
   .then((platform) => {
     root.render(
       <StrictMode>
