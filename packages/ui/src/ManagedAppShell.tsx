@@ -1,4 +1,7 @@
-import type { PlatformService } from "@ai-writer/platform";
+import {
+  createWritingOrchestratorPlatform,
+  type PlatformService,
+} from "@ai-writer/platform";
 import { useMemo, useState } from "react";
 import { AppShell as LegacyAppShell } from "./AppShell";
 import { ContentManager } from "./ContentManager";
@@ -12,21 +15,22 @@ export interface ManagedAppShellProps {
 
 export function ManagedAppShell({ platform }: ManagedAppShellProps) {
   const [revision, setRevision] = useState(0);
-  const retryingPlatform = useMemo(
-    () => createRetryingPlatform(platform),
+  const writingPlatform = useMemo(
+    () =>
+      createWritingOrchestratorPlatform(createRetryingPlatform(platform)),
     [platform],
   );
 
   return (
     <>
       <div key={revision}>
-        <LegacyAppShell platform={retryingPlatform} />
+        <LegacyAppShell platform={writingPlatform} />
       </div>
       <ContentManager
-        platform={retryingPlatform}
+        platform={writingPlatform}
         onChanged={() => setRevision((current) => current + 1)}
       />
-      <KnowledgeLibrary platform={retryingPlatform} />
+      <KnowledgeLibrary platform={writingPlatform} />
     </>
   );
 }
