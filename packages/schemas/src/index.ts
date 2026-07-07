@@ -156,6 +156,7 @@ export const generationTaskTypeSchema = z.enum([
   "rewrite",
   "expand",
   "shorten",
+  "consistency_check",
   "consistency_fix",
 ]);
 
