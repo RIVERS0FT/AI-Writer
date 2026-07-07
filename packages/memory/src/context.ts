@@ -19,11 +19,10 @@ function estimateTokens(text: string): number {
 
 export function buildMemoryContext(
   sections: ContextSection[],
-  tokenBudget: number,
 ): BuiltMemoryContext {
   const lines: string[] = [];
   const selectedIds: string[] = [];
-  let used = 0;
+  let estimatedTokens = 0;
 
   for (const section of sections) {
     const accepted: string[] = [];
@@ -31,21 +30,21 @@ export function buildMemoryContext(
     for (const item of section.items) {
       if (!item.isEnabled) continue;
       const line = `- ${item.title ? `${item.title}：` : ""}${item.content}`;
-      const cost = estimateTokens(line);
-      if (used + cost > tokenBudget) continue;
       accepted.push(line);
       selectedIds.push(item.id);
-      used += cost;
+      estimatedTokens += estimateTokens(line);
     }
 
     if (accepted.length > 0) {
-      lines.push(`[${section.title}]`, ...accepted, "");
+      const title = `[${section.title}]`;
+      lines.push(title, ...accepted, "");
+      estimatedTokens += estimateTokens(title);
     }
   }
 
   return {
     text: lines.join("\n").trim(),
     selectedIds,
-    estimatedTokens: used,
+    estimatedTokens,
   };
 }

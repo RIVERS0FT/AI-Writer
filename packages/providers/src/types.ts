@@ -27,8 +27,34 @@ export interface GenerateRequest {
   profile: ModelProfile;
 }
 
+export type ProviderWritingTaskType =
+  | "chapter_generation"
+  | "chapter_continuation"
+  | "scene_generation"
+  | "rewrite"
+  | "expand"
+  | "shorten"
+  | "consistency_check"
+  | "consistency_fix";
+
+export interface ProviderWritingMetadata {
+  projectId: string;
+  chapterId?: string | undefined;
+  taskType: ProviderWritingTaskType;
+  stepType?: "draft" | undefined;
+}
+
 export interface ProviderRuntimeRequest extends GenerateRequest {
   provider: ProviderConfig;
+  writing?: ProviderWritingMetadata | undefined;
+}
+
+export interface ProviderUsage {
+  inputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+  totalTokens?: number | undefined;
+  cachedInputTokens?: number | undefined;
+  reasoningTokens?: number | undefined;
 }
 
 export interface GenerationChunk {
@@ -46,6 +72,7 @@ export type GenerationStreamEvent =
         taskId: string;
         inputTokens?: number;
         outputTokens?: number;
+        usage?: ProviderUsage;
       };
     }
   | { event: "error"; data: { taskId: string; message: string } };
@@ -55,6 +82,7 @@ export interface GenerateResult {
   text: string;
   inputTokens?: number;
   outputTokens?: number;
+  usage?: ProviderUsage;
 }
 
 export interface ConnectionTestResult {

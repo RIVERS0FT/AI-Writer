@@ -1,45 +1,63 @@
-export interface ContextBudget {
-  total: number;
-  systemPrompt: number;
-  userInstruction: number;
-  currentOutline: number;
-  canonicalMemory: number;
-  characterMemory: number;
-  recentMemory: number;
-  retrievedMemory: number;
-  generationReserve: number;
+export interface ContextCapacityInput {
+  modelContextWindow?: number | undefined;
+  estimatedInputTokens?: number | undefined;
+  requestedOutputTokens?: number | undefined;
 }
 
-const ratios = {
-  systemPrompt: 0.1,
-  userInstruction: 0.08,
-  currentOutline: 0.17,
-  canonicalMemory: 0.15,
-  characterMemory: 0.15,
-  recentMemory: 0.15,
-  retrievedMemory: 0.2,
-} as const;
+export interface ContextCapacityReport {
+  modelContextWindow?: number | undefined;
+  estimatedInputTokens?: number | undefined;
+  requestedOutputTokens?: number | undefined;
+  estimatedTotalTokens?: number | undefined;
+  exceeded: boolean;
+  remainingTokens?: number | undefined;
+}
 
-export function createContextBudget(
-  total: number,
-  generationReserveRatio = 0.2,
-): ContextBudget {
-  if (!Number.isFinite(total) || total <= 0) {
-    throw new Error("Context budget must be a positive number");
+export function estimateTokenCount(text: string): number {
+  const latinWords = text.match(/[A-Za-z0-9_]+/g)?.length ?? 0;
+  const nonLatinCharacters = text.replace(/[\x00-\x7F]/g, "").length;
+  const punctuation = text.match(/[^\sA-Za-z0-9_\x00-\x7F]/g)?.length ?? 0;
+  return Math.max(
+    0,
+    Math.ceil(latinWords * 1.3 + nonLatinCharacters * 0.75 + punctuation * 0.25),
+  );
+}
+
+export function inspectContextCapacity(
+  input: ContextCapacityInput,
+): ContextCapacityReport {
+  const estimatedTotalTokens =
+    input.estimatedInputTokens !== undefined ||
+    input.requestedOutputTokens !== undefined
+      ? (input.estimatedInputTokens ?? 0) + (input.requestedOutputTokens ?? 0)
+      : undefined;
+
+  if (input.modelContextWindow === undefined || estimatedTotalTokens === undefined) {
+    return {
+      ...(input.modelContextWindow !== undefined
+        ? { modelContextWindow: input.modelContextWindow }
+        : {}),
+      ...(input.estimatedInputTokens !== undefined
+        ? { estimatedInputTokens: input.estimatedInputTokens }
+        : {}),
+      ...(input.requestedOutputTokens !== undefined
+        ? { requestedOutputTokens: input.requestedOutputTokens }
+        : {}),
+      ...(estimatedTotalTokens !== undefined ? { estimatedTotalTokens } : {}),
+      exceeded: false,
+    };
   }
 
-  const generationReserve = Math.floor(total * generationReserveRatio);
-  const inputBudget = total - generationReserve;
-
   return {
-    total,
-    systemPrompt: Math.floor(inputBudget * ratios.systemPrompt),
-    userInstruction: Math.floor(inputBudget * ratios.userInstruction),
-    currentOutline: Math.floor(inputBudget * ratios.currentOutline),
-    canonicalMemory: Math.floor(inputBudget * ratios.canonicalMemory),
-    characterMemory: Math.floor(inputBudget * ratios.characterMemory),
-    recentMemory: Math.floor(inputBudget * ratios.recentMemory),
-    retrievedMemory: Math.floor(inputBudget * ratios.retrievedMemory),
-    generationReserve,
+    modelContextWindow: input.modelContextWindow,
+    ...(input.estimatedInputTokens !== undefined
+      ? { estimatedInputTokens: input.estimatedInputTokens }
+      : {}),
+    ...(input.requestedOutputTokens !== undefined
+      ? { requestedOutputTokens: input.requestedOutputTokens }
+      : {}),
+    estimatedTotalTokens,
+    exceeded: estimatedTotalTokens > input.modelContextWindow,
+    remainingTokens: input.modelContextWindow - estimatedTotalTokens,
   };
 }

@@ -1,3 +1,5 @@
+import type { WritingPipelineOptions, WritingTaskType } from "./writing";
+
 export type ProjectStatus = "planning" | "writing" | "completed" | "archived";
 export type ChapterStatus = "planned" | "drafting" | "completed";
 
@@ -96,12 +98,7 @@ export type GenerationStatus =
   | "failed"
   | "cancelled";
 
-export type GenerationTaskType =
-  | "chapter_continuation"
-  | "scene_generation"
-  | "rewrite"
-  | "expand"
-  | "consistency_check";
+export type GenerationTaskType = WritingTaskType;
 
 export interface GenerationJob {
   id: string;
@@ -112,9 +109,15 @@ export interface GenerationJob {
   taskType: GenerationTaskType;
   status: GenerationStatus;
   progress: number;
+  instruction: string;
+  pipelineVersion: string;
+  promptSetVersion: string;
+  options: WritingPipelineOptions;
   inputTokens?: number | undefined;
   outputTokens?: number | undefined;
   retryCount: number;
+  startedAt?: string | undefined;
+  completedAt?: string | undefined;
   createdAt: string;
   updatedAt: string;
   errorCode?: string | undefined;

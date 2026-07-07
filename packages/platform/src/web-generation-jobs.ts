@@ -1,7 +1,8 @@
-import type {
-  GenerationJob,
-  GenerationOutput,
-  GenerationStatus,
+import {
+  defaultWritingPipelineOptions,
+  type GenerationJob,
+  type GenerationOutput,
+  type GenerationStatus,
 } from "@ai-writer/core";
 import {
   createGenerationJobInputSchema,
@@ -22,6 +23,19 @@ const interruptedStatuses = new Set<GenerationStatus>([
   "saving",
 ]);
 
+type StoredGenerationJob = Partial<GenerationJob> &
+  Pick<
+    GenerationJob,
+    | "id"
+    | "projectId"
+    | "taskType"
+    | "status"
+    | "progress"
+    | "retryCount"
+    | "createdAt"
+    | "updatedAt"
+  >;
+
 function readJsonArray<T>(key: string): T[] {
   const raw = globalThis.localStorage?.getItem(key);
   if (!raw) return [];
@@ -37,10 +51,34 @@ function writeJsonArray<T>(key: string, values: T[]): void {
   globalThis.localStorage?.setItem(key, JSON.stringify(values));
 }
 
+function readJobs(): GenerationJob[] {
+  const stored = readJsonArray<StoredGenerationJob>(jobsStorageKey);
+  let migrated = false;
+  const jobs = stored.map((job) => {
+    if (
+      job.instruction === undefined ||
+      job.pipelineVersion === undefined ||
+      job.promptSetVersion === undefined ||
+      job.options === undefined
+    ) {
+      migrated = true;
+    }
+    return {
+      ...job,
+      instruction: job.instruction ?? "",
+      pipelineVersion: job.pipelineVersion ?? "1",
+      promptSetVersion: job.promptSetVersion ?? "1",
+      options: job.options ?? defaultWritingPipelineOptions,
+    } as GenerationJob;
+  });
+  if (migrated) writeJsonArray(jobsStorageKey, jobs);
+  return jobs;
+}
+
 export function createWebGenerationJobRepository(): GenerationJobRepository {
   return {
     async listRecent(projectId, limit = 20) {
-      return readJsonArray<GenerationJob>(jobsStorageKey)
+      return readJobs()
         .filter((job) => job.projectId === projectId)
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
         .slice(0, limit);
@@ -55,6 +93,10 @@ export function createWebGenerationJobRepository(): GenerationJobRepository {
         taskType: parsed.taskType,
         status: "queued",
         progress: 0,
+        instruction: parsed.instruction,
+        pipelineVersion: parsed.pipelineVersion,
+        promptSetVersion: parsed.promptSetVersion,
+        options: parsed.options,
         retryCount: 0,
         createdAt: now,
         updatedAt: now,
@@ -66,7 +108,7 @@ export function createWebGenerationJobRepository(): GenerationJobRepository {
           ? { modelProfileId: parsed.modelProfileId }
           : {}),
       };
-      const jobs = readJsonArray<GenerationJob>(jobsStorageKey);
+      const jobs = readJobs();
       writeJsonArray(jobsStorageKey, [
         job,
         ...jobs.filter((item) => item.id !== job.id),
@@ -76,7 +118,7 @@ export function createWebGenerationJobRepository(): GenerationJobRepository {
 
     async update(id, input) {
       const parsed = updateGenerationJobInputSchema.parse(input);
-      const jobs = readJsonArray<GenerationJob>(jobsStorageKey);
+      const jobs = readJobs();
       const current = jobs.find((job) => job.id === id);
       if (!current) throw new Error("生成任务不存在");
 
@@ -96,12 +138,10 @@ export function createWebGenerationJobRepository(): GenerationJobRepository {
         updatedAt: new Date().toISOString(),
       };
 
-      if (parsed.errorCode === null) delete updated.errorCode;
-      else if (parsed.errorCode !== undefined) updated.errorCode = parsed.errorCode;
-      if (parsed.errorMessage === null) delete updated.errorMessage;
-      else if (parsed.errorMessage !== undefined) {
-        updated.errorMessage = parsed.errorMessage;
-      }
+      setNullable(updated, "startedAt", parsed.startedAt);
+      setNullable(updated, "completedAt", parsed.completedAt);
+      setNullable(updated, "errorCode", parsed.errorCode);
+      setNullable(updated, "errorMessage", parsed.errorMessage);
 
       writeJsonArray(
         jobsStorageKey,
@@ -133,7 +173,7 @@ export function createWebGenerationJobRepository(): GenerationJobRepository {
     },
 
     async markInterrupted(projectId) {
-      const jobs = readJsonArray<GenerationJob>(jobsStorageKey);
+      const jobs = readJobs();
       let changed = 0;
       const now = new Date().toISOString();
       const next = jobs.map((job) => {
@@ -145,6 +185,7 @@ export function createWebGenerationJobRepository(): GenerationJobRepository {
           ...job,
           status: "failed" as const,
           progress: 1,
+          completedAt: now,
           errorCode: "app_restarted",
           errorMessage: "应用关闭时任务仍在运行，已保留现有输出。",
           updatedAt: now,
@@ -154,4 +195,13 @@ export function createWebGenerationJobRepository(): GenerationJobRepository {
       return changed;
     },
   };
+}
+
+function setNullable<T extends object, K extends keyof T>(
+  target: T,
+  key: K,
+  value: T[K] | null | undefined,
+): void {
+  if (value === null) delete (target as Partial<T>)[key];
+  else if (value !== undefined) target[key] = value;
 }

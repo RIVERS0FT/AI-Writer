@@ -16,6 +16,8 @@ import { createContentRepository } from "./content-repository";
 import { createGenerationJobRepository } from "./generation-job-repository";
 import { createKnowledgeRepository } from "./knowledge-repository";
 import { createProviderRepository } from "./provider-repository";
+import { createUsageRepository } from "./usage-repository";
+import { createWritingRepository } from "./writing-repository";
 
 interface ProjectRow {
   id: string;
@@ -106,6 +108,8 @@ export async function createNativePlatform(
     contents: createContentRepository(database),
     knowledge: createKnowledgeRepository(database),
     generationJobs: createGenerationJobRepository(database),
+    writing: createWritingRepository(database),
+    usage: createUsageRepository(database),
     providers: createProviderRepository(database),
     secureStorage: dependencies.secureStorage,
     providerRuntime: dependencies.providerRuntime,
