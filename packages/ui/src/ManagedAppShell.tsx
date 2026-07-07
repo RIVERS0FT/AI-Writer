@@ -5,7 +5,6 @@ import { ContentManager } from "./ContentManager";
 import { KnowledgeLibrary } from "./KnowledgeLibrary";
 import { createRetryingPlatform } from "./retrying-platform";
 import "./stage4.css";
-import "./stage5.css";
 
 export interface ManagedAppShellProps {
   platform: PlatformService;
