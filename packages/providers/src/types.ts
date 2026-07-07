@@ -34,6 +34,7 @@ export type ProviderWritingTaskType =
   | "rewrite"
   | "expand"
   | "shorten"
+  | "consistency_check"
   | "consistency_fix";
 
 export interface ProviderWritingMetadata {
