@@ -150,12 +150,23 @@ export const generationStatusSchema = z.enum([
 ]);
 
 export const generationTaskTypeSchema = z.enum([
+  "chapter_generation",
   "chapter_continuation",
   "scene_generation",
   "rewrite",
   "expand",
-  "consistency_check",
+  "shorten",
+  "consistency_fix",
 ]);
+
+export const writingPipelineOptionsSchema = z.object({
+  enablePlanning: z.boolean().default(true),
+  enableContinuityReview: z.boolean().default(true),
+  enableCharacterReview: z.boolean().default(true),
+  enableStyleReview: z.boolean().default(true),
+  enableTargetedRewrite: z.boolean().default(true),
+  enableMemoryExtraction: z.boolean().default(true),
+});
 
 export const createGenerationJobInputSchema = z.object({
   id: z.string().min(1),
@@ -164,6 +175,17 @@ export const createGenerationJobInputSchema = z.object({
   providerConfigId: z.string().min(1).optional(),
   modelProfileId: z.string().min(1).optional(),
   taskType: generationTaskTypeSchema,
+  instruction: z.string().max(50_000).default(""),
+  pipelineVersion: z.string().min(1).max(100).default("1"),
+  promptSetVersion: z.string().min(1).max(100).default("1"),
+  options: writingPipelineOptionsSchema.default({
+    enablePlanning: true,
+    enableContinuityReview: true,
+    enableCharacterReview: true,
+    enableStyleReview: true,
+    enableTargetedRewrite: true,
+    enableMemoryExtraction: true,
+  }),
 });
 
 export const updateGenerationJobInputSchema = z.object({
@@ -172,8 +194,98 @@ export const updateGenerationJobInputSchema = z.object({
   inputTokens: z.number().int().min(0).optional(),
   outputTokens: z.number().int().min(0).optional(),
   retryCount: z.number().int().min(0).optional(),
+  startedAt: z.string().nullable().optional(),
+  completedAt: z.string().nullable().optional(),
   errorCode: z.string().max(100).nullable().optional(),
   errorMessage: z.string().max(4_000).nullable().optional(),
+});
+
+export const writingStepTypeSchema = z.enum([
+  "context_build",
+  "chapter_plan",
+  "scene_plan",
+  "draft",
+  "continuity_review",
+  "character_review",
+  "style_review",
+  "targeted_rewrite",
+  "polish",
+  "memory_extraction",
+  "save",
+]);
+
+export const writingStepStatusSchema = z.enum([
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+]);
+
+export const usageSourceSchema = z.enum(["provider", "estimated", "unknown"]);
+
+export const createWritingStepInputSchema = z.object({
+  id: z.string().min(1),
+  jobId: z.string().min(1),
+  stepType: writingStepTypeSchema,
+  order: z.number().int().min(0),
+  status: writingStepStatusSchema.default("queued"),
+  promptId: z.string().max(200).optional(),
+  promptVersion: z.string().max(100).optional(),
+  contextSnapshotId: z.string().max(200).optional(),
+  input: z.unknown().optional(),
+});
+
+export const updateWritingStepInputSchema = z.object({
+  status: writingStepStatusSchema.optional(),
+  attemptCount: z.number().int().min(0).optional(),
+  promptId: z.string().max(200).nullable().optional(),
+  promptVersion: z.string().max(100).nullable().optional(),
+  inputTokens: z.number().int().min(0).nullable().optional(),
+  outputTokens: z.number().int().min(0).nullable().optional(),
+  totalTokens: z.number().int().min(0).nullable().optional(),
+  usageSource: usageSourceSchema.nullable().optional(),
+  latencyMs: z.number().int().min(0).nullable().optional(),
+  contextSnapshotId: z.string().max(200).nullable().optional(),
+  input: z.unknown().optional(),
+  output: z.unknown().optional(),
+  startedAt: z.string().nullable().optional(),
+  completedAt: z.string().nullable().optional(),
+  errorMessage: z.string().max(4_000).nullable().optional(),
+});
+
+export const generationRequestStatusSchema = z.enum([
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+export const recordTokenUsageInputSchema = z.object({
+  id: z.string().min(1),
+  jobId: z.string().min(1),
+  stepId: z.string().min(1),
+  projectId: z.string().min(1),
+  chapterId: z.string().min(1).optional(),
+  providerConfigId: z.string().min(1).optional(),
+  modelProfileId: z.string().min(1).optional(),
+  model: z.string().min(1).max(200),
+  taskType: generationTaskTypeSchema,
+  stepType: writingStepTypeSchema,
+  attempt: z.number().int().min(1),
+  status: generationRequestStatusSchema,
+  inputTokens: z.number().int().min(0).optional(),
+  outputTokens: z.number().int().min(0).optional(),
+  totalTokens: z.number().int().min(0).optional(),
+  cachedInputTokens: z.number().int().min(0).optional(),
+  reasoningTokens: z.number().int().min(0).optional(),
+  source: usageSourceSchema,
+  latencyMs: z.number().int().min(0).optional(),
+  errorCode: z.string().max(100).optional(),
+  errorMessage: z.string().max(4_000).optional(),
+  startedAt: z.string(),
+  completedAt: z.string().optional(),
 });
 
 export const providerTypeSchema = z.enum([
@@ -220,3 +332,6 @@ export type CreateOutlineNodeInput = z.infer<typeof createOutlineNodeInputSchema
 export type UpdateOutlineNodeInput = z.infer<typeof updateOutlineNodeInputSchema>;
 export type CreateGenerationJobInput = z.infer<typeof createGenerationJobInputSchema>;
 export type UpdateGenerationJobInput = z.infer<typeof updateGenerationJobInputSchema>;
+export type CreateWritingStepInput = z.infer<typeof createWritingStepInputSchema>;
+export type UpdateWritingStepInput = z.infer<typeof updateWritingStepInputSchema>;
+export type RecordTokenUsageInput = z.infer<typeof recordTokenUsageInputSchema>;
