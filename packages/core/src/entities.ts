@@ -28,8 +28,6 @@ export interface Chapter {
   title: string;
   order: number;
   status: ChapterStatus;
-  contentJson: Record<string, unknown>;
-  contentMarkdown: string;
   plainText: string;
   summary?: string | undefined;
   contentHash: string;
@@ -41,8 +39,6 @@ export interface ChapterVersion {
   id: string;
   chapterId: string;
   version: number;
-  contentJson: Record<string, unknown>;
-  contentMarkdown: string;
   plainText: string;
   changeType: "manual" | "autosave" | "ai_generation" | "recovery";
   changeReason?: string | undefined;
