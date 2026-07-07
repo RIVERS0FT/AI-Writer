@@ -1,12 +1,30 @@
 import {
   defaultWritingPipelineOptions,
   type GenerationJob,
+  type TokenUsageRecord,
+  type UsageSummary,
   type WritingStep,
 } from "@ai-writer/core";
-import type { GenerationStreamEvent } from "@ai-writer/providers";
+import type {
+  GenerationStreamEvent,
+  ModelProfile,
+  ProviderConfig,
+  ProviderRuntimeRequest,
+} from "@ai-writer/providers";
 import { describe, expect, it } from "vitest";
 import type { PlatformService } from "./index";
 import { createWritingOrchestratorPlatform } from "./writing-orchestrator";
+
+const emptyUsageSummary = (): UsageSummary => ({
+  requestCount: 0,
+  retryCount: 0,
+  knownInputTokens: 0,
+  knownOutputTokens: 0,
+  knownTotalTokens: 0,
+  unknownRequestCount: 0,
+  providerRequestCount: 0,
+  estimatedRequestCount: 0,
+});
 
 function createPlatform(responses: string[]): {
   platform: PlatformService;
@@ -151,14 +169,13 @@ function createPlatform(responses: string[]): {
       async listRecent() {
         return [...jobs.values()];
       },
-      async create(input: Parameters<PlatformService["generationJobs"]["create"]>[0]) {
+      async create(
+        input: Parameters<PlatformService["generationJobs"]["create"]>[0],
+      ) {
         const now = "2026-07-07T00:00:00.000Z";
         const job: GenerationJob = {
           id: input.id,
           projectId: input.projectId,
-          chapterId: input.chapterId,
-          providerConfigId: input.providerConfigId,
-          modelProfileId: input.modelProfileId,
           taskType: input.taskType,
           status: "queued",
           progress: 0,
@@ -169,14 +186,28 @@ function createPlatform(responses: string[]): {
           retryCount: 0,
           createdAt: now,
           updatedAt: now,
+          ...(input.chapterId ? { chapterId: input.chapterId } : {}),
+          ...(input.providerConfigId
+            ? { providerConfigId: input.providerConfigId }
+            : {}),
+          ...(input.modelProfileId
+            ? { modelProfileId: input.modelProfileId }
+            : {}),
         };
         jobs.set(job.id, job);
         return job;
       },
-      async update(id: string, input: Parameters<PlatformService["generationJobs"]["update"]>[1]) {
+      async update(
+        id: string,
+        input: Parameters<PlatformService["generationJobs"]["update"]>[1],
+      ) {
         const current = jobs.get(id);
         if (!current) throw new Error("missing job");
-        const updated = { ...current, ...input, updatedAt: current.updatedAt } as GenerationJob;
+        const updated = {
+          ...current,
+          ...input,
+          updatedAt: current.updatedAt,
+        } as GenerationJob;
         jobs.set(id, updated);
         return updated;
       },
@@ -194,7 +225,9 @@ function createPlatform(responses: string[]): {
       async listSteps(jobId: string) {
         return steps.filter((step) => step.jobId === jobId);
       },
-      async createStep(input: Parameters<PlatformService["writing"]["createStep"]>[0]) {
+      async createStep(
+        input: Parameters<PlatformService["writing"]["createStep"]>[0],
+      ) {
         const step: WritingStep = {
           id: input.id,
           jobId: input.jobId,
@@ -202,14 +235,19 @@ function createPlatform(responses: string[]): {
           order: input.order,
           status: input.status ?? "queued",
           attemptCount: 0,
-          promptId: input.promptId,
-          promptVersion: input.promptVersion,
-          input: input.input,
+          ...(input.promptId ? { promptId: input.promptId } : {}),
+          ...(input.promptVersion
+            ? { promptVersion: input.promptVersion }
+            : {}),
+          ...(input.input !== undefined ? { input: input.input } : {}),
         };
         steps.push(step);
         return step;
       },
-      async updateStep(id: string, input: Parameters<PlatformService["writing"]["updateStep"]>[1]) {
+      async updateStep(
+        id: string,
+        input: Parameters<PlatformService["writing"]["updateStep"]>[1],
+      ) {
         const index = steps.findIndex((step) => step.id === id);
         if (index < 0) throw new Error("missing step");
         const current = steps[index]!;
@@ -219,46 +257,39 @@ function createPlatform(responses: string[]): {
       },
     },
     usage: {
-      async recordRequest(input) {
-        return input;
+      async recordRequest(
+        input: Parameters<PlatformService["usage"]["recordRequest"]>[0],
+      ): Promise<TokenUsageRecord> {
+        return { ...input };
       },
       async listForJob() {
         return [];
       },
       async summarizeTask() {
-        return {
-          requestCount: 0,
-          retryCount: 0,
-          knownInputTokens: 0,
-          knownOutputTokens: 0,
-          knownTotalTokens: 0,
-          unknownRequestCount: 0,
-          providerRequestCount: 0,
-          estimatedRequestCount: 0,
-        };
+        return emptyUsageSummary();
       },
       async summarizeChapter() {
-        return this.summarizeTask("");
+        return emptyUsageSummary();
       },
       async summarizeProject() {
-        return this.summarizeTask("");
+        return emptyUsageSummary();
       },
       async summarizeModel() {
-        return this.summarizeTask("");
+        return emptyUsageSummary();
       },
     },
     providers: {
       async listProviders() {
         return [];
       },
-      async saveProvider(value) {
+      async saveProvider(value: ProviderConfig) {
         return value;
       },
       async deleteProvider() {},
       async listModelProfiles() {
         return [];
       },
-      async saveModelProfile(value) {
+      async saveModelProfile(value: ModelProfile) {
         return value;
       },
       async deleteModelProfile() {},
@@ -278,12 +309,18 @@ function createPlatform(responses: string[]): {
       async testConnection() {
         return { ok: true, latencyMs: 1, message: "ok" };
       },
-      async generate(request, onEvent) {
+      async generate(
+        request: ProviderRuntimeRequest,
+        onEvent: (event: GenerationStreamEvent) => void,
+      ) {
         calls.push(request.writing?.stepType ?? "unknown");
         const response = responses.shift();
         if (response === undefined) throw new Error("missing response");
         onEvent({ event: "started", data: { taskId: request.taskId } });
-        onEvent({ event: "chunk", data: { taskId: request.taskId, text: response } });
+        onEvent({
+          event: "chunk",
+          data: { taskId: request.taskId, text: response },
+        });
         onEvent({ event: "finished", data: { taskId: request.taskId } });
       },
       async cancel() {
