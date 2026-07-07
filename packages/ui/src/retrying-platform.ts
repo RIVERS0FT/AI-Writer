@@ -1,16 +1,34 @@
 import type {
+  GenerationJobRepository,
   PlatformService,
   ProviderRuntimeService,
 } from "@ai-writer/platform";
 import type {
   GenerationStreamEvent,
+  ProviderRuntimeRequest,
   ProviderUsage,
+  ProviderWritingMetadata,
 } from "@ai-writer/providers";
 
 export function createRetryingPlatform(
   platform: PlatformService,
 ): PlatformService {
   const cancelledTasks = new Set<string>();
+  const taskMetadata = new Map<string, ProviderWritingMetadata>();
+
+  const generationJobs: GenerationJobRepository = {
+    ...platform.generationJobs,
+    async create(input) {
+      const job = await platform.generationJobs.create(input);
+      taskMetadata.set(job.id, {
+        projectId: job.projectId,
+        ...(job.chapterId ? { chapterId: job.chapterId } : {}),
+        taskType: job.taskType,
+        stepType: "draft",
+      });
+      return job;
+    },
+  };
 
   const providerRuntime: ProviderRuntimeService = {
     testConnection(provider) {
@@ -18,9 +36,13 @@ export function createRetryingPlatform(
     },
 
     async generate(request, onEvent) {
+      const writing = request.writing ?? taskMetadata.get(request.taskId);
+      const trackedRequest: ProviderRuntimeRequest = writing
+        ? { ...request, writing }
+        : request;
       const maximumRetries = request.profile.maxRetries;
       let startedForwarded = false;
-      const step = request.writing
+      const step = writing
         ? await ensureDraftStep(platform, request.taskId, {
             systemPrompt: request.systemPrompt,
             userPrompt: request.userPrompt,
@@ -71,7 +93,7 @@ export function createRetryingPlatform(
           }
 
           try {
-            await platform.providerRuntime.generate(request, (event) => {
+            await platform.providerRuntime.generate(trackedRequest, (event) => {
               if (event.event === "started") {
                 if (!startedForwarded) {
                   startedForwarded = true;
@@ -94,7 +116,7 @@ export function createRetryingPlatform(
             const latencyMs = Math.max(0, Date.now() - startedMs);
             totalLatencyMs += latencyMs;
             const usage = normalizeUsage(finishedData);
-            await recordAttempt(platform, request, step?.id, {
+            await recordAttempt(platform, trackedRequest, step?.id, {
               id: requestId,
               attempt,
               status: "completed",
@@ -156,7 +178,7 @@ export function createRetryingPlatform(
             const latencyMs = Math.max(0, Date.now() - startedMs);
             totalLatencyMs += latencyMs;
             const message = reason instanceof Error ? reason.message : String(reason);
-            await recordAttempt(platform, request, step?.id, {
+            await recordAttempt(platform, trackedRequest, step?.id, {
               id: requestId,
               attempt,
               status: cancelled ? "cancelled" : "failed",
@@ -211,6 +233,7 @@ export function createRetryingPlatform(
         }
       } finally {
         cancelledTasks.delete(request.taskId);
+        taskMetadata.delete(request.taskId);
       }
     },
 
@@ -222,6 +245,7 @@ export function createRetryingPlatform(
 
   return {
     ...platform,
+    generationJobs,
     providerRuntime,
   };
 }
@@ -261,7 +285,7 @@ interface AttemptResult {
 
 async function recordAttempt(
   platform: PlatformService,
-  request: Parameters<ProviderRuntimeService["generate"]>[0],
+  request: ProviderRuntimeRequest,
   stepId: string | undefined,
   result: AttemptResult,
 ): Promise<void> {
