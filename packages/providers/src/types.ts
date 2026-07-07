@@ -37,11 +37,27 @@ export type ProviderWritingTaskType =
   | "consistency_check"
   | "consistency_fix";
 
+export type ProviderWritingStepType =
+  | "context_build"
+  | "chapter_plan"
+  | "scene_plan"
+  | "draft"
+  | "continuity_review"
+  | "character_review"
+  | "style_review"
+  | "targeted_rewrite"
+  | "polish"
+  | "memory_extraction"
+  | "save";
+
 export interface ProviderWritingMetadata {
   projectId: string;
   chapterId?: string | undefined;
   taskType: ProviderWritingTaskType;
-  stepType?: "draft" | undefined;
+  stepId?: string | undefined;
+  stepType: ProviderWritingStepType;
+  promptId?: string | undefined;
+  promptVersion?: string | undefined;
 }
 
 export interface ProviderRuntimeRequest extends GenerateRequest {
@@ -89,6 +105,15 @@ export interface ConnectionTestResult {
   ok: boolean;
   latencyMs: number;
   message: string;
+}
+
+export interface ProviderRuntimeService {
+  testConnection(provider: ProviderConfig): Promise<ConnectionTestResult>;
+  generate(
+    request: ProviderRuntimeRequest,
+    onEvent: (event: GenerationStreamEvent) => void,
+  ): Promise<void>;
+  cancel(taskId: string): Promise<boolean>;
 }
 
 export interface GenerateCallbacks {

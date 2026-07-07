@@ -8,7 +8,22 @@ import type {
   ProviderRuntimeRequest,
   ProviderUsage,
   ProviderWritingMetadata,
+  ProviderWritingStepType,
 } from "@ai-writer/providers";
+
+const stepOrder: Record<ProviderWritingStepType, number> = {
+  context_build: 0,
+  chapter_plan: 10,
+  scene_plan: 20,
+  draft: 30,
+  continuity_review: 40,
+  character_review: 50,
+  style_review: 60,
+  targeted_rewrite: 70,
+  polish: 80,
+  memory_extraction: 90,
+  save: 100,
+};
 
 export function createRetryingPlatform(
   platform: PlatformService,
@@ -25,6 +40,8 @@ export function createRetryingPlatform(
         ...(job.chapterId ? { chapterId: job.chapterId } : {}),
         taskType: job.taskType,
         stepType: "draft",
+        promptId: "chapter-continuation",
+        promptVersion: "1",
       });
       return job;
     },
@@ -43,7 +60,7 @@ export function createRetryingPlatform(
       const maximumRetries = request.profile.maxRetries;
       let startedForwarded = false;
       const step = writing
-        ? await ensureDraftStep(platform, request.taskId, {
+        ? await ensureWritingStep(platform, request.taskId, writing, {
             systemPrompt: request.systemPrompt,
             userPrompt: request.userPrompt,
           })
@@ -126,26 +143,50 @@ export function createRetryingPlatform(
               completedAt: new Date().toISOString(),
             });
 
-            const summary = await platform.usage
-              .summarizeTask(request.taskId)
-              .catch(() => undefined);
+            const records = await platform.usage
+              .listForJob(request.taskId)
+              .catch(() => []);
+            const stepRecords = step
+              ? records.filter((record) => record.stepId === step.id)
+              : [];
+            const hasProviderUsage = stepRecords.some(
+              (record) => record.source === "provider",
+            );
+            const hasEstimatedUsage = stepRecords.some(
+              (record) => record.source === "estimated",
+            );
+            const inputTokens = stepRecords.reduce(
+              (total, record) => total + (record.inputTokens ?? 0),
+              0,
+            );
+            const outputTokens = stepRecords.reduce(
+              (total, record) => total + (record.outputTokens ?? 0),
+              0,
+            );
+            const totalTokens = stepRecords.reduce(
+              (total, record) =>
+                total +
+                (record.totalTokens ??
+                  (record.inputTokens !== undefined &&
+                  record.outputTokens !== undefined
+                    ? record.inputTokens + record.outputTokens
+                    : 0)),
+              0,
+            );
+
             if (step) {
-              const hasKnownUsage =
-                summary !== undefined &&
-                summary.providerRequestCount + summary.estimatedRequestCount > 0;
               await platform.writing
                 .updateStep(step.id, {
                   status: "completed",
                   attemptCount: attempt,
-                  ...(hasKnownUsage
+                  ...(hasProviderUsage || hasEstimatedUsage
                     ? {
-                        inputTokens: summary.knownInputTokens,
-                        outputTokens: summary.knownOutputTokens,
-                        totalTokens: summary.knownTotalTokens,
-                        usageSource:
-                          summary.estimatedRequestCount > 0
-                            ? "estimated"
-                            : "provider",
+                        inputTokens,
+                        outputTokens,
+                        totalTokens,
+                        usageSource: hasEstimatedUsage
+                          ? "estimated"
+                          : "provider",
                       }
                     : { usageSource: "unknown" }),
                   latencyMs: totalLatencyMs,
@@ -155,6 +196,9 @@ export function createRetryingPlatform(
                 .catch(() => undefined);
             }
 
+            const summary = await platform.usage
+              .summarizeTask(request.taskId)
+              .catch(() => undefined);
             const data: Extract<
               GenerationStreamEvent,
               { event: "finished" }
@@ -223,7 +267,7 @@ export function createRetryingPlatform(
               throw new Error("用户取消生成");
             }
             await platform.generationJobs.update(request.taskId, {
-              status: "generating",
+              status: generationStatusForStep(writing?.stepType),
               progress: Math.min(0.2 + retryCount * 0.1, 0.8),
               retryCount,
               errorCode: null,
@@ -250,25 +294,46 @@ export function createRetryingPlatform(
   };
 }
 
-async function ensureDraftStep(
+async function ensureWritingStep(
   platform: PlatformService,
   jobId: string,
+  writing: ProviderWritingMetadata,
   input: { systemPrompt: string; userPrompt: string },
 ) {
-  const existing = (await platform.writing.listSteps(jobId)).find(
-    (step) => step.stepType === "draft",
-  );
+  const steps = await platform.writing.listSteps(jobId);
+  const existing = writing.stepId
+    ? steps.find((step) => step.id === writing.stepId)
+    : steps.find((step) => step.stepType === writing.stepType);
   if (existing) return existing;
   return platform.writing.createStep({
-    id: crypto.randomUUID(),
+    id: writing.stepId ?? crypto.randomUUID(),
     jobId,
-    stepType: "draft",
-    order: 0,
+    stepType: writing.stepType,
+    order: stepOrder[writing.stepType],
     status: "queued",
-    promptId: "chapter-continuation",
-    promptVersion: "1",
+    promptId: writing.promptId ?? writing.stepType,
+    promptVersion: writing.promptVersion ?? "1",
     input,
   });
+}
+
+function generationStatusForStep(
+  stepType: ProviderWritingStepType | undefined,
+): "planning" | "generating" | "reviewing" | "rewriting" {
+  if (stepType === "chapter_plan" || stepType === "scene_plan") {
+    return "planning";
+  }
+  if (
+    stepType === "continuity_review" ||
+    stepType === "character_review" ||
+    stepType === "style_review"
+  ) {
+    return "reviewing";
+  }
+  if (stepType === "targeted_rewrite" || stepType === "polish") {
+    return "rewriting";
+  }
+  return "generating";
 }
 
 interface AttemptResult {
@@ -303,7 +368,7 @@ async function recordAttempt(
       modelProfileId: request.profile.id,
       model: request.profile.model,
       taskType: request.writing.taskType,
-      stepType: request.writing.stepType ?? "draft",
+      stepType: request.writing.stepType,
       attempt: result.attempt,
       status: result.status,
       ...(result.usage.inputTokens !== undefined
