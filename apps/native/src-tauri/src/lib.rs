@@ -38,6 +38,12 @@ pub fn run() {
             sql: include_str!("../migrations/0002_content_management.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "plain_text_only",
+            sql: include_str!("../migrations/0003_plain_text_only.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

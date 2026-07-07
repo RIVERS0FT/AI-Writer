@@ -1,6 +1,5 @@
 import {
-  createChapterStarterHtml,
-  createHtmlContentDocument,
+  createChapterStarterText,
   hashText,
   type Chapter,
   type ChapterVersion,
@@ -34,8 +33,6 @@ interface ChapterRow {
   title: string;
   sort_order: number;
   status: Chapter["status"];
-  content_json: string;
-  content_markdown: string;
   plain_text: string;
   summary: string;
   content_hash: string;
@@ -47,8 +44,6 @@ interface ChapterVersionRow {
   id: string;
   chapter_id: string;
   version: number;
-  content_json: string;
-  content_markdown: string;
   plain_text: string;
   change_type: ChapterVersion["changeType"];
   change_reason: string | null;
@@ -61,17 +56,6 @@ interface NextOrderRow {
 
 interface NextVersionRow {
   next_version: number;
-}
-
-function parseContentJson(value: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
 }
 
 function mapVolume(row: VolumeRow): Volume {
@@ -93,8 +77,6 @@ function mapChapter(row: ChapterRow): Chapter {
     title: row.title,
     order: row.sort_order,
     status: row.status,
-    contentJson: parseContentJson(row.content_json),
-    contentMarkdown: row.content_markdown,
     plainText: row.plain_text,
     contentHash: row.content_hash,
     createdAt: row.created_at,
@@ -109,8 +91,6 @@ function mapChapterVersion(row: ChapterVersionRow): ChapterVersion {
     id: row.id,
     chapterId: row.chapter_id,
     version: row.version,
-    contentJson: parseContentJson(row.content_json),
-    contentMarkdown: row.content_markdown,
     plainText: row.plain_text,
     changeType: row.change_type,
     createdAt: row.created_at,
@@ -118,7 +98,10 @@ function mapChapterVersion(row: ChapterVersionRow): ChapterVersion {
   };
 }
 
-async function getVolume(database: Database, id: string): Promise<Volume | undefined> {
+async function getVolume(
+  database: Database,
+  id: string,
+): Promise<Volume | undefined> {
   const rows = await database.select<VolumeRow[]>(
     `SELECT id, project_id, title, summary, sort_order, created_at, updated_at
      FROM volumes
@@ -129,10 +112,13 @@ async function getVolume(database: Database, id: string): Promise<Volume | undef
   return rows[0] ? mapVolume(rows[0]) : undefined;
 }
 
-async function getChapter(database: Database, id: string): Promise<Chapter | undefined> {
+async function getChapter(
+  database: Database,
+  id: string,
+): Promise<Chapter | undefined> {
   const rows = await database.select<ChapterRow[]>(
-    `SELECT id, project_id, volume_id, title, sort_order, status, content_json,
-            content_markdown, plain_text, summary, content_hash, created_at, updated_at
+    `SELECT id, project_id, volume_id, title, sort_order, status, plain_text,
+            summary, content_hash, created_at, updated_at
      FROM chapters
      WHERE id = $1
      LIMIT 1`,
@@ -141,7 +127,10 @@ async function getChapter(database: Database, id: string): Promise<Chapter | und
   return rows[0] ? mapChapter(rows[0]) : undefined;
 }
 
-async function nextVersionNumber(database: Database, chapterId: string): Promise<number> {
+async function nextVersionNumber(
+  database: Database,
+  chapterId: string,
+): Promise<number> {
   const rows = await database.select<NextVersionRow[]>(
     `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
      FROM chapter_versions
@@ -248,8 +237,7 @@ export function createContentRepository(database: Database): ContentRepository {
       const rows = await database.select<ChapterRow[]>(
         `SELECT c.id, c.project_id,
                 CASE WHEN v.id IS NULL THEN NULL ELSE c.volume_id END AS volume_id,
-                c.title, c.sort_order, c.status, c.content_json,
-                c.content_markdown, c.plain_text, c.summary,
+                c.title, c.sort_order, c.status, c.plain_text, c.summary,
                 c.content_hash, c.created_at, c.updated_at
          FROM chapters c
          LEFT JOIN volumes v ON v.id = c.volume_id AND v.deleted_at IS NULL
@@ -279,17 +267,15 @@ export function createContentRepository(database: Database): ContentRepository {
       }
 
       const now = new Date().toISOString();
-      const html = createChapterStarterHtml(parsed.title);
+      const plainText = createChapterStarterText(parsed.title);
       const chapter: Chapter = {
         id: crypto.randomUUID(),
         projectId: parsed.projectId,
         title: parsed.title,
         order,
         status: parsed.status,
-        contentJson: createHtmlContentDocument(html),
-        contentMarkdown: html,
-        plainText: parsed.title,
-        contentHash: hashText(html),
+        plainText,
+        contentHash: hashText(plainText),
         createdAt: now,
         updatedAt: now,
         ...(parsed.volumeId ? { volumeId: parsed.volumeId } : {}),
@@ -297,10 +283,9 @@ export function createContentRepository(database: Database): ContentRepository {
 
       await database.execute(
         `INSERT INTO chapters
-          (id, project_id, volume_id, title, sort_order, status, content_json,
-           content_markdown, plain_text, summary, content_hash, created_at,
-           updated_at, deleted_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', $10, $11, $11, NULL)`,
+          (id, project_id, volume_id, title, sort_order, status, plain_text,
+           summary, content_hash, created_at, updated_at, deleted_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, $9, $9, NULL)`,
         [
           chapter.id,
           chapter.projectId,
@@ -308,8 +293,6 @@ export function createContentRepository(database: Database): ContentRepository {
           chapter.title,
           chapter.order,
           chapter.status,
-          JSON.stringify(chapter.contentJson),
-          chapter.contentMarkdown,
           chapter.plainText,
           chapter.contentHash,
           now,
@@ -373,21 +356,17 @@ export function createContentRepository(database: Database): ContentRepository {
     async saveChapterContent(input) {
       const parsed = updateChapterContentInputSchema.parse(input);
       const now = new Date().toISOString();
-      const contentHash = hashText(parsed.contentMarkdown);
+      const contentHash = hashText(parsed.plainText);
       const result = await database.execute(
         `UPDATE chapters
-         SET content_json = $2,
-             content_markdown = $3,
-             plain_text = $4,
-             summary = COALESCE($5, summary),
-             content_hash = $6,
+         SET plain_text = $2,
+             summary = COALESCE($3, summary),
+             content_hash = $4,
              status = CASE WHEN status = 'planned' THEN 'drafting' ELSE status END,
-             updated_at = $7
+             updated_at = $5
          WHERE id = $1 AND deleted_at IS NULL`,
         [
           parsed.chapterId,
-          JSON.stringify(parsed.contentJson),
-          parsed.contentMarkdown,
           parsed.plainText,
           parsed.summary ?? null,
           contentHash,
@@ -407,8 +386,6 @@ export function createContentRepository(database: Database): ContentRepository {
         id: crypto.randomUUID(),
         chapterId: parsed.chapterId,
         version: await nextVersionNumber(database, parsed.chapterId),
-        contentJson: parsed.contentJson,
-        contentMarkdown: parsed.contentMarkdown,
         plainText: parsed.plainText,
         changeType: parsed.changeType,
         createdAt: now,
@@ -416,15 +393,12 @@ export function createContentRepository(database: Database): ContentRepository {
       };
       await database.execute(
         `INSERT INTO chapter_versions
-          (id, chapter_id, version, content_json, content_markdown, plain_text,
-           change_type, change_reason, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          (id, chapter_id, version, plain_text, change_type, change_reason, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           version.id,
           version.chapterId,
           version.version,
-          JSON.stringify(version.contentJson),
-          version.contentMarkdown,
           version.plainText,
           version.changeType,
           version.changeReason ?? null,
@@ -436,8 +410,8 @@ export function createContentRepository(database: Database): ContentRepository {
 
     async listChapterVersions(chapterId) {
       const rows = await database.select<ChapterVersionRow[]>(
-        `SELECT id, chapter_id, version, content_json, content_markdown,
-                plain_text, change_type, change_reason, created_at
+        `SELECT id, chapter_id, version, plain_text, change_type,
+                change_reason, created_at
          FROM chapter_versions
          WHERE chapter_id = $1
          ORDER BY version DESC`,
@@ -448,8 +422,8 @@ export function createContentRepository(database: Database): ContentRepository {
 
     async restoreChapterVersion(versionId) {
       const rows = await database.select<ChapterVersionRow[]>(
-        `SELECT id, chapter_id, version, content_json, content_markdown,
-                plain_text, change_type, change_reason, created_at
+        `SELECT id, chapter_id, version, plain_text, change_type,
+                change_reason, created_at
          FROM chapter_versions
          WHERE id = $1
          LIMIT 1`,
@@ -460,32 +434,21 @@ export function createContentRepository(database: Database): ContentRepository {
       const now = new Date().toISOString();
       const result = await database.execute(
         `UPDATE chapters
-         SET content_json = $2, content_markdown = $3, plain_text = $4,
-             content_hash = $5, status = 'drafting', updated_at = $6
+         SET plain_text = $2, content_hash = $3, status = 'drafting', updated_at = $4
          WHERE id = $1 AND deleted_at IS NULL`,
-        [
-          source.chapter_id,
-          source.content_json,
-          source.content_markdown,
-          source.plain_text,
-          hashText(source.content_markdown),
-          now,
-        ],
+        [source.chapter_id, source.plain_text, hashText(source.plain_text), now],
       );
       if (result.rowsAffected === 0) throw new Error("章节不存在或已删除");
 
       const recoveryVersion = await nextVersionNumber(database, source.chapter_id);
       await database.execute(
         `INSERT INTO chapter_versions
-          (id, chapter_id, version, content_json, content_markdown, plain_text,
-           change_type, change_reason, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'recovery', $7, $8)`,
+          (id, chapter_id, version, plain_text, change_type, change_reason, created_at)
+         VALUES ($1, $2, $3, $4, 'recovery', $5, $6)`,
         [
           crypto.randomUUID(),
           source.chapter_id,
           recoveryVersion,
-          source.content_json,
-          source.content_markdown,
           source.plain_text,
           `恢复版本 v${source.version}`,
           now,
