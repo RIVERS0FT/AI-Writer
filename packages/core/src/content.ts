@@ -7,22 +7,7 @@ export function hashText(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-export function createPlainTextContentDocument(
-  text: string,
-): Record<string, unknown> {
-  return {
-    format: "plain-text",
-    text,
-  };
-}
-
-export function createHtmlContentDocument(
-  text: string,
-): Record<string, unknown> {
-  return createPlainTextContentDocument(text);
-}
-
-export function createChapterStarterHtml(title: string): string {
+export function createChapterStarterText(title: string): string {
   return `${normalizeLineEndings(title).trim()}\n\n`;
 }
 
