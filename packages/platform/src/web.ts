@@ -26,6 +26,8 @@ import type {
 import { createWebContentRepository } from "./web-content";
 import { createWebGenerationJobRepository } from "./web-generation-jobs";
 import { createWebKnowledgeRepository } from "./web-knowledge";
+import { createWebUsageRepository } from "./web-usage";
+import { createWebWritingRepository } from "./web-writing";
 
 const projectsStorageKey = "ai-writer.projects.v1";
 const providersStorageKey = "ai-writer.providers.v1";
@@ -277,7 +279,7 @@ export function createWebPlatform(): PlatformService {
   return {
     runtime: {
       name: "AI-Writer Web",
-      version: "0.5.0",
+      version: "0.6.0",
       platform: "web",
       os: navigator.platform || "browser",
     },
@@ -285,6 +287,8 @@ export function createWebPlatform(): PlatformService {
     contents: createWebContentRepository(),
     knowledge: createWebKnowledgeRepository(),
     generationJobs: createWebGenerationJobRepository(),
+    writing: createWebWritingRepository(),
+    usage: createWebUsageRepository(),
     providers: providerRepository,
     secureStorage,
     providerRuntime: createProviderRuntime(secureStorage),
