@@ -159,3 +159,5 @@ export interface PlatformService {
   secureStorage: SecureStorageService;
   providerRuntime: ProviderRuntimeService;
 }
+
+export * from "./writing-orchestrator";
