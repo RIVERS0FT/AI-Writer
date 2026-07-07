@@ -12,6 +12,8 @@ import {
   createChapterVersionInputSchema,
   createVolumeInputSchema,
   updateChapterContentInputSchema,
+  updateChapterMetadataInputSchema,
+  updateVolumeInputSchema,
 } from "@ai-writer/schemas";
 import type Database from "@tauri-apps/plugin-sql";
 
@@ -116,6 +118,17 @@ function mapChapterVersion(row: ChapterVersionRow): ChapterVersion {
   };
 }
 
+async function getVolume(database: Database, id: string): Promise<Volume | undefined> {
+  const rows = await database.select<VolumeRow[]>(
+    `SELECT id, project_id, title, summary, sort_order, created_at, updated_at
+     FROM volumes
+     WHERE id = $1
+     LIMIT 1`,
+    [id],
+  );
+  return rows[0] ? mapVolume(rows[0]) : undefined;
+}
+
 async function getChapter(database: Database, id: string): Promise<Chapter | undefined> {
   const rows = await database.select<ChapterRow[]>(
     `SELECT id, project_id, volume_id, title, sort_order, status, content_json,
@@ -128,13 +141,23 @@ async function getChapter(database: Database, id: string): Promise<Chapter | und
   return rows[0] ? mapChapter(rows[0]) : undefined;
 }
 
+async function nextVersionNumber(database: Database, chapterId: string): Promise<number> {
+  const rows = await database.select<NextVersionRow[]>(
+    `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
+     FROM chapter_versions
+     WHERE chapter_id = $1`,
+    [chapterId],
+  );
+  return rows[0]?.next_version ?? 1;
+}
+
 export function createContentRepository(database: Database): ContentRepository {
   return {
     async listVolumes(projectId) {
       const rows = await database.select<VolumeRow[]>(
         `SELECT id, project_id, title, summary, sort_order, created_at, updated_at
          FROM volumes
-         WHERE project_id = $1
+         WHERE project_id = $1 AND deleted_at IS NULL
          ORDER BY sort_order ASC, created_at ASC`,
         [projectId],
       );
@@ -148,7 +171,7 @@ export function createContentRepository(database: Database): ContentRepository {
         const rows = await database.select<NextOrderRow[]>(
           `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order
            FROM volumes
-           WHERE project_id = $1`,
+           WHERE project_id = $1 AND deleted_at IS NULL`,
           [parsed.projectId],
         );
         order = rows[0]?.next_order ?? 0;
@@ -166,8 +189,8 @@ export function createContentRepository(database: Database): ContentRepository {
       };
       await database.execute(
         `INSERT INTO volumes
-          (id, project_id, title, summary, sort_order, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $6)`,
+          (id, project_id, title, summary, sort_order, created_at, updated_at, deleted_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $6, NULL)`,
         [
           volume.id,
           volume.projectId,
@@ -180,14 +203,57 @@ export function createContentRepository(database: Database): ContentRepository {
       return volume;
     },
 
+    async updateVolume(input) {
+      const parsed = updateVolumeInputSchema.parse(input);
+      const current = await getVolume(database, parsed.id);
+      if (!current) throw new Error("卷不存在");
+      const updated: Volume = {
+        ...current,
+        title: parsed.title ?? current.title,
+        summary: parsed.summary ?? current.summary,
+        order: parsed.order ?? current.order,
+        updatedAt: new Date().toISOString(),
+      };
+      await database.execute(
+        `UPDATE volumes
+         SET title = $2, summary = $3, sort_order = $4, updated_at = $5
+         WHERE id = $1`,
+        [updated.id, updated.title, updated.summary, updated.order, updated.updatedAt],
+      );
+      return updated;
+    },
+
+    async deleteVolume(id) {
+      const result = await database.execute(
+        `UPDATE volumes SET deleted_at = $2, updated_at = $2
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [id, new Date().toISOString()],
+      );
+      if (result.rowsAffected === 0) throw new Error("卷不存在或已删除");
+    },
+
+    async restoreVolume(id) {
+      const now = new Date().toISOString();
+      const result = await database.execute(
+        `UPDATE volumes SET deleted_at = NULL, updated_at = $2 WHERE id = $1`,
+        [id, now],
+      );
+      if (result.rowsAffected === 0) throw new Error("卷不存在");
+      const volume = await getVolume(database, id);
+      if (!volume) throw new Error("恢复后未找到卷");
+      return volume;
+    },
+
     async listChapters(projectId) {
       const rows = await database.select<ChapterRow[]>(
-        `SELECT c.id, c.project_id, c.volume_id, c.title, c.sort_order, c.status,
-                c.content_json, c.content_markdown, c.plain_text, c.summary,
+        `SELECT c.id, c.project_id,
+                CASE WHEN v.id IS NULL THEN NULL ELSE c.volume_id END AS volume_id,
+                c.title, c.sort_order, c.status, c.content_json,
+                c.content_markdown, c.plain_text, c.summary,
                 c.content_hash, c.created_at, c.updated_at
          FROM chapters c
-         LEFT JOIN volumes v ON v.id = c.volume_id
-         WHERE c.project_id = $1
+         LEFT JOIN volumes v ON v.id = c.volume_id AND v.deleted_at IS NULL
+         WHERE c.project_id = $1 AND c.deleted_at IS NULL
          ORDER BY COALESCE(v.sort_order, 2147483647), c.sort_order, c.created_at`,
         [projectId],
       );
@@ -205,7 +271,7 @@ export function createContentRepository(database: Database): ContentRepository {
         const rows = await database.select<NextOrderRow[]>(
           `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order
            FROM chapters
-           WHERE project_id = $1
+           WHERE project_id = $1 AND deleted_at IS NULL
              AND (($2 IS NULL AND volume_id IS NULL) OR volume_id = $2)`,
           [parsed.projectId, parsed.volumeId ?? null],
         );
@@ -232,8 +298,9 @@ export function createContentRepository(database: Database): ContentRepository {
       await database.execute(
         `INSERT INTO chapters
           (id, project_id, volume_id, title, sort_order, status, content_json,
-           content_markdown, plain_text, summary, content_hash, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', $10, $11, $11)`,
+           content_markdown, plain_text, summary, content_hash, created_at,
+           updated_at, deleted_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '', $10, $11, $11, NULL)`,
         [
           chapter.id,
           chapter.projectId,
@@ -251,6 +318,58 @@ export function createContentRepository(database: Database): ContentRepository {
       return chapter;
     },
 
+    async updateChapter(input) {
+      const parsed = updateChapterMetadataInputSchema.parse(input);
+      const current = await getChapter(database, parsed.id);
+      if (!current) throw new Error("章节不存在");
+      const updated: Chapter = {
+        ...current,
+        title: parsed.title ?? current.title,
+        order: parsed.order ?? current.order,
+        status: parsed.status ?? current.status,
+        updatedAt: new Date().toISOString(),
+      };
+      if (parsed.volumeId === null) delete updated.volumeId;
+      else if (parsed.volumeId !== undefined) updated.volumeId = parsed.volumeId;
+
+      await database.execute(
+        `UPDATE chapters
+         SET title = $2, volume_id = $3, sort_order = $4, status = $5,
+             updated_at = $6
+         WHERE id = $1`,
+        [
+          updated.id,
+          updated.title,
+          updated.volumeId ?? null,
+          updated.order,
+          updated.status,
+          updated.updatedAt,
+        ],
+      );
+      return updated;
+    },
+
+    async deleteChapter(id) {
+      const result = await database.execute(
+        `UPDATE chapters SET deleted_at = $2, updated_at = $2
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [id, new Date().toISOString()],
+      );
+      if (result.rowsAffected === 0) throw new Error("章节不存在或已删除");
+    },
+
+    async restoreChapter(id) {
+      const now = new Date().toISOString();
+      const result = await database.execute(
+        `UPDATE chapters SET deleted_at = NULL, updated_at = $2 WHERE id = $1`,
+        [id, now],
+      );
+      if (result.rowsAffected === 0) throw new Error("章节不存在");
+      const chapter = await getChapter(database, id);
+      if (!chapter) throw new Error("恢复后未找到章节");
+      return chapter;
+    },
+
     async saveChapterContent(input) {
       const parsed = updateChapterContentInputSchema.parse(input);
       const now = new Date().toISOString();
@@ -264,7 +383,7 @@ export function createContentRepository(database: Database): ContentRepository {
              content_hash = $6,
              status = CASE WHEN status = 'planned' THEN 'drafting' ELSE status END,
              updated_at = $7
-         WHERE id = $1`,
+         WHERE id = $1 AND deleted_at IS NULL`,
         [
           parsed.chapterId,
           JSON.stringify(parsed.contentJson),
@@ -283,17 +402,11 @@ export function createContentRepository(database: Database): ContentRepository {
 
     async createChapterVersion(input) {
       const parsed = createChapterVersionInputSchema.parse(input);
-      const rows = await database.select<NextVersionRow[]>(
-        `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
-         FROM chapter_versions
-         WHERE chapter_id = $1`,
-        [parsed.chapterId],
-      );
       const now = new Date().toISOString();
       const version: ChapterVersion = {
         id: crypto.randomUUID(),
         chapterId: parsed.chapterId,
-        version: rows[0]?.next_version ?? 1,
+        version: await nextVersionNumber(database, parsed.chapterId),
         contentJson: parsed.contentJson,
         contentMarkdown: parsed.contentMarkdown,
         plainText: parsed.plainText,
@@ -331,6 +444,57 @@ export function createContentRepository(database: Database): ContentRepository {
         [chapterId],
       );
       return rows.map(mapChapterVersion);
+    },
+
+    async restoreChapterVersion(versionId) {
+      const rows = await database.select<ChapterVersionRow[]>(
+        `SELECT id, chapter_id, version, content_json, content_markdown,
+                plain_text, change_type, change_reason, created_at
+         FROM chapter_versions
+         WHERE id = $1
+         LIMIT 1`,
+        [versionId],
+      );
+      const source = rows[0];
+      if (!source) throw new Error("章节版本不存在");
+      const now = new Date().toISOString();
+      const result = await database.execute(
+        `UPDATE chapters
+         SET content_json = $2, content_markdown = $3, plain_text = $4,
+             content_hash = $5, status = 'drafting', updated_at = $6
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [
+          source.chapter_id,
+          source.content_json,
+          source.content_markdown,
+          source.plain_text,
+          hashText(source.content_markdown),
+          now,
+        ],
+      );
+      if (result.rowsAffected === 0) throw new Error("章节不存在或已删除");
+
+      const recoveryVersion = await nextVersionNumber(database, source.chapter_id);
+      await database.execute(
+        `INSERT INTO chapter_versions
+          (id, chapter_id, version, content_json, content_markdown, plain_text,
+           change_type, change_reason, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'recovery', $7, $8)`,
+        [
+          crypto.randomUUID(),
+          source.chapter_id,
+          recoveryVersion,
+          source.content_json,
+          source.content_markdown,
+          source.plain_text,
+          `恢复版本 v${source.version}`,
+          now,
+        ],
+      );
+
+      const chapter = await getChapter(database, source.chapter_id);
+      if (!chapter) throw new Error("恢复后未找到章节");
+      return chapter;
     },
   };
 }

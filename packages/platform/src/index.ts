@@ -20,7 +20,9 @@ import type {
   CreateProjectInput,
   CreateVolumeInput,
   UpdateChapterContentInput,
+  UpdateChapterMetadataInput,
   UpdateGenerationJobInput,
+  UpdateVolumeInput,
 } from "@ai-writer/schemas";
 
 export interface RuntimeInfo {
@@ -39,12 +41,19 @@ export interface ProjectRepository {
 export interface ContentRepository {
   listVolumes(projectId: string): Promise<Volume[]>;
   createVolume(input: CreateVolumeInput): Promise<Volume>;
+  updateVolume(input: UpdateVolumeInput): Promise<Volume>;
+  deleteVolume(id: string): Promise<void>;
+  restoreVolume(id: string): Promise<Volume>;
   listChapters(projectId: string): Promise<Chapter[]>;
   getChapter(id: string): Promise<Chapter | undefined>;
   createChapter(input: CreateChapterInput): Promise<Chapter>;
+  updateChapter(input: UpdateChapterMetadataInput): Promise<Chapter>;
+  deleteChapter(id: string): Promise<void>;
+  restoreChapter(id: string): Promise<Chapter>;
   saveChapterContent(input: UpdateChapterContentInput): Promise<Chapter>;
   createChapterVersion(input: CreateChapterVersionInput): Promise<ChapterVersion>;
   listChapterVersions(chapterId: string): Promise<ChapterVersion[]>;
+  restoreChapterVersion(versionId: string): Promise<Chapter>;
 }
 
 export interface GenerationJobRepository {

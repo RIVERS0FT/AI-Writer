@@ -32,6 +32,21 @@ export const createVolumeInputSchema = z.object({
   order: z.number().int().min(0).optional(),
 });
 
+export const updateVolumeInputSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().trim().min(1).max(200).optional(),
+    summary: z.string().trim().max(20_000).optional(),
+    order: z.number().int().min(0).optional(),
+  })
+  .refine(
+    (value) =>
+      value.title !== undefined ||
+      value.summary !== undefined ||
+      value.order !== undefined,
+    "至少需要更新一个卷字段",
+  );
+
 export const createChapterInputSchema = z.object({
   projectId: z.string().min(1),
   volumeId: z.string().min(1).optional(),
@@ -39,6 +54,23 @@ export const createChapterInputSchema = z.object({
   order: z.number().int().min(0).optional(),
   status: chapterStatusSchema.default("planned"),
 });
+
+export const updateChapterMetadataInputSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().trim().min(1).max(200).optional(),
+    volumeId: z.string().min(1).nullable().optional(),
+    order: z.number().int().min(0).optional(),
+    status: chapterStatusSchema.optional(),
+  })
+  .refine(
+    (value) =>
+      value.title !== undefined ||
+      value.volumeId !== undefined ||
+      value.order !== undefined ||
+      value.status !== undefined,
+    "至少需要更新一个章节字段",
+  );
 
 export const updateChapterContentInputSchema = z.object({
   chapterId: z.string().min(1),
@@ -128,7 +160,11 @@ export const modelProfileSchema = z.object({
 
 export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 export type CreateVolumeInput = z.infer<typeof createVolumeInputSchema>;
+export type UpdateVolumeInput = z.infer<typeof updateVolumeInputSchema>;
 export type CreateChapterInput = z.infer<typeof createChapterInputSchema>;
+export type UpdateChapterMetadataInput = z.infer<
+  typeof updateChapterMetadataInputSchema
+>;
 export type UpdateChapterContentInput = z.infer<
   typeof updateChapterContentInputSchema
 >;
