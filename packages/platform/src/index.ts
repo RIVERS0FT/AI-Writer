@@ -119,7 +119,7 @@ export interface PlatformService {
   runtime: RuntimeInfo;
   projects: ProjectRepository;
   contents: ContentRepository;
-  knowledge: KnowledgeRepository;
+  knowledge?: KnowledgeRepository | undefined;
   generationJobs: GenerationJobRepository;
   providers: ProviderRepository;
   secureStorage: SecureStorageService;
