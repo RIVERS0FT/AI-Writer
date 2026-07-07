@@ -1,11 +1,9 @@
 {
   "name": "ai-writer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packageManager": "pnpm@10.15.0",
-  "engines": {
-    "node": ">=20"
-  },
+  "engines": { "node": ">=20" },
   "scripts": {
     "dev": "turbo run dev --parallel",
     "dev:native": "pnpm --filter @ai-writer/native tauri dev",

@@ -1,28 +1,55 @@
 import type { NovelProject } from "@ai-writer/core";
-import { createProjectInputSchema, type CreateProjectInput } from "@ai-writer/schemas";
-import type { PlatformService, ProjectRepository } from "./index";
+import {
+  buildOpenAICompatiblePayload,
+  parseOpenAICompatibleSseData,
+  resolveChatCompletionsUrl,
+  resolveModelsUrl,
+  type ConnectionTestResult,
+  type GenerationStreamEvent,
+  type ModelProfile,
+  type ProviderConfig,
+  type ProviderRuntimeRequest,
+} from "@ai-writer/providers";
+import {
+  createProjectInputSchema,
+  modelProfileSchema,
+  providerConfigSchema,
+  type CreateProjectInput,
+} from "@ai-writer/schemas";
+import type {
+  PlatformService,
+  ProjectRepository,
+  ProviderRepository,
+  ProviderRuntimeService,
+  SecureStorageService,
+} from "./index";
 
-const storageKey = "ai-writer.projects.v1";
+const projectsStorageKey = "ai-writer.projects.v1";
+const providersStorageKey = "ai-writer.providers.v1";
+const profilesStorageKey = "ai-writer.model-profiles.v1";
+const secretsStoragePrefix = "ai-writer.secret.";
 
-function readProjects(): NovelProject[] {
-  const raw = globalThis.localStorage?.getItem(storageKey);
+function readJsonArray<T>(key: string): T[] {
+  const raw = globalThis.localStorage?.getItem(key);
   if (!raw) return [];
 
   try {
     const value: unknown = JSON.parse(raw);
-    return Array.isArray(value) ? (value as NovelProject[]) : [];
+    return Array.isArray(value) ? (value as T[]) : [];
   } catch {
     return [];
   }
 }
 
-function writeProjects(projects: NovelProject[]): void {
-  globalThis.localStorage?.setItem(storageKey, JSON.stringify(projects));
+function writeJsonArray<T>(key: string, values: T[]): void {
+  globalThis.localStorage?.setItem(key, JSON.stringify(values));
 }
 
-const repository: ProjectRepository = {
+const projectRepository: ProjectRepository = {
   async list() {
-    return readProjects().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return readJsonArray<NovelProject>(projectsStorageKey).sort((a, b) =>
+      b.updatedAt.localeCompare(a.updatedAt),
+    );
   },
 
   async create(input: CreateProjectInput) {
@@ -38,19 +65,229 @@ const repository: ProjectRepository = {
       updatedAt: now,
     };
 
-    writeProjects([project, ...readProjects()]);
+    writeJsonArray(projectsStorageKey, [
+      project,
+      ...readJsonArray<NovelProject>(projectsStorageKey),
+    ]);
     return project;
   },
 };
 
+const providerRepository: ProviderRepository = {
+  async listProviders() {
+    return readJsonArray<ProviderConfig>(providersStorageKey);
+  },
+
+  async saveProvider(config) {
+    const parsed = providerConfigSchema.parse(config);
+    const providers = readJsonArray<ProviderConfig>(providersStorageKey);
+    const next = [parsed, ...providers.filter((item) => item.id !== parsed.id)];
+    writeJsonArray(providersStorageKey, next);
+    return parsed;
+  },
+
+  async deleteProvider(id) {
+    writeJsonArray(
+      providersStorageKey,
+      readJsonArray<ProviderConfig>(providersStorageKey).filter(
+        (provider) => provider.id !== id,
+      ),
+    );
+    writeJsonArray(
+      profilesStorageKey,
+      readJsonArray<ModelProfile>(profilesStorageKey).filter(
+        (profile) => profile.providerConfigId !== id,
+      ),
+    );
+  },
+
+  async listModelProfiles(providerConfigId) {
+    return readJsonArray<ModelProfile>(profilesStorageKey).filter(
+      (profile) => profile.providerConfigId === providerConfigId,
+    );
+  },
+
+  async saveModelProfile(profile) {
+    const parsed = modelProfileSchema.parse(profile);
+    const profiles = readJsonArray<ModelProfile>(profilesStorageKey);
+    const next = [parsed, ...profiles.filter((item) => item.id !== parsed.id)];
+    writeJsonArray(profilesStorageKey, next);
+    return parsed;
+  },
+
+  async deleteModelProfile(id) {
+    writeJsonArray(
+      profilesStorageKey,
+      readJsonArray<ModelProfile>(profilesStorageKey).filter(
+        (profile) => profile.id !== id,
+      ),
+    );
+  },
+};
+
+let webVaultUnlocked = false;
+
+const secureStorage: SecureStorageService = {
+  async unlock(password) {
+    if (!password.trim()) throw new Error("密钥库密码不能为空");
+    webVaultUnlocked = true;
+  },
+
+  isUnlocked() {
+    return webVaultUnlocked;
+  },
+
+  async setSecret(key, value) {
+    if (!webVaultUnlocked) throw new Error("密钥库尚未解锁");
+    globalThis.sessionStorage?.setItem(`${secretsStoragePrefix}${key}`, value);
+  },
+
+  async getSecret(key) {
+    if (!webVaultUnlocked) throw new Error("密钥库尚未解锁");
+    return globalThis.sessionStorage?.getItem(`${secretsStoragePrefix}${key}`) ?? null;
+  },
+
+  async removeSecret(key) {
+    if (!webVaultUnlocked) throw new Error("密钥库尚未解锁");
+    globalThis.sessionStorage?.removeItem(`${secretsStoragePrefix}${key}`);
+  },
+};
+
+function headersFor(provider: ProviderConfig, apiKey: string): Headers {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (apiKey.trim()) headers.set("Authorization", `Bearer ${apiKey.trim()}`);
+  for (const [key, value] of Object.entries(provider.customHeaders ?? {})) {
+    headers.set(key, value);
+  }
+  return headers;
+}
+
+function createProviderRuntime(secureStorage: SecureStorageService): ProviderRuntimeService {
+  const abortControllers = new Map<string, AbortController>();
+
+  async function credentialFor(provider: ProviderConfig): Promise<string> {
+    if (!provider.apiKeyRef) throw new Error("Provider 没有密钥引用");
+    const credential = await secureStorage.getSecret(provider.apiKeyRef);
+    if (!credential) throw new Error("会话密钥库中没有找到 Provider 凭据");
+    return credential;
+  }
+
+  return {
+  async testConnection(provider): Promise<ConnectionTestResult> {
+    const startedAt = performance.now();
+    try {
+      const apiKey = await credentialFor(provider);
+      const response = await fetch(resolveModelsUrl(provider), {
+        method: "GET",
+        headers: headersFor(provider, apiKey),
+      });
+      const latencyMs = Math.round(performance.now() - startedAt);
+      return {
+        ok: response.ok,
+        latencyMs,
+        message: response.ok
+          ? `连接成功（HTTP ${response.status}）`
+          : `连接失败（HTTP ${response.status}）`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        latencyMs: Math.round(performance.now() - startedAt),
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  },
+
+  async generate(request, onEvent) {
+    const controller = new AbortController();
+    abortControllers.set(request.taskId, controller);
+    onEvent({ event: "started", data: { taskId: request.taskId } });
+
+    try {
+      const apiKey = await credentialFor(request.provider);
+      const response = await fetch(resolveChatCompletionsUrl(request.provider), {
+        method: "POST",
+        headers: headersFor(request.provider, apiKey),
+        body: JSON.stringify(buildOpenAICompatiblePayload(request)),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const detail = (await response.text()).slice(0, 800);
+        throw new Error(`HTTP ${response.status}: ${detail || response.statusText}`);
+      }
+      if (!response.body) throw new Error("模型服务没有返回流式响应");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let inputTokens: number | undefined;
+      let outputTokens: number | undefined;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+
+        let newlineIndex = buffer.indexOf("\n");
+        while (newlineIndex >= 0) {
+          const rawLine = buffer.slice(0, newlineIndex).replace(/\r$/, "");
+          buffer = buffer.slice(newlineIndex + 1);
+          newlineIndex = buffer.indexOf("\n");
+
+          if (!rawLine.startsWith("data:")) continue;
+          const parsed = parseOpenAICompatibleSseData(rawLine.slice(5));
+          if (!parsed) continue;
+
+          if (parsed.inputTokens !== undefined) inputTokens = parsed.inputTokens;
+          if (parsed.outputTokens !== undefined) outputTokens = parsed.outputTokens;
+          if (parsed.text) {
+            onEvent({
+              event: "chunk",
+              data: { taskId: request.taskId, text: parsed.text },
+            });
+          }
+          if (parsed.done) break;
+        }
+
+        if (done) break;
+      }
+
+      const finishedData: Extract<GenerationStreamEvent, { event: "finished" }>["data"] = {
+        taskId: request.taskId,
+      };
+      if (inputTokens !== undefined) finishedData.inputTokens = inputTokens;
+      if (outputTokens !== undefined) finishedData.outputTokens = outputTokens;
+      onEvent({ event: "finished", data: finishedData });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onEvent({ event: "error", data: { taskId: request.taskId, message } });
+      throw error;
+    } finally {
+      abortControllers.delete(request.taskId);
+    }
+  },
+
+  async cancel(taskId) {
+    const controller = abortControllers.get(taskId);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  },
+  };
+}
+
 export function createWebPlatform(): PlatformService {
+  const runtime = createProviderRuntime(secureStorage);
   return {
     runtime: {
       name: "AI-Writer Web",
-      version: "0.1.0",
+      version: "0.2.0",
       platform: "web",
       os: navigator.platform || "browser",
     },
-    projects: repository,
+    projects: projectRepository,
+    providers: providerRepository,
+    secureStorage,
+    providerRuntime: runtime,
   };
 }

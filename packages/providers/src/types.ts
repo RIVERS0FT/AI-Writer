@@ -8,7 +8,9 @@ export interface ProviderConfig {
 }
 
 export interface ModelProfile {
+  id: string;
   providerConfigId: string;
+  name: string;
   model: string;
   temperature: number;
   topP?: number;
@@ -25,11 +27,28 @@ export interface GenerateRequest {
   profile: ModelProfile;
 }
 
+export interface ProviderRuntimeRequest extends GenerateRequest {
+  provider: ProviderConfig;
+}
+
 export interface GenerationChunk {
   taskId: string;
   text: string;
   done: boolean;
 }
+
+export type GenerationStreamEvent =
+  | { event: "started"; data: { taskId: string } }
+  | { event: "chunk"; data: { taskId: string; text: string } }
+  | {
+      event: "finished";
+      data: {
+        taskId: string;
+        inputTokens?: number;
+        outputTokens?: number;
+      };
+    }
+  | { event: "error"; data: { taskId: string; message: string } };
 
 export interface GenerateResult {
   taskId: string;

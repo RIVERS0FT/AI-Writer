@@ -1,6 +1,6 @@
 {
   "name": "@ai-writer/platform",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@ai-writer/core": "workspace:*",
+    "@ai-writer/providers": "workspace:*",
     "@ai-writer/schemas": "workspace:*"
   },
   "devDependencies": {

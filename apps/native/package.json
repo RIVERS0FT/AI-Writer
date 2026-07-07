@@ -1,6 +1,6 @@
 {
   "name": "@ai-writer/native",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,9 +13,11 @@
   "dependencies": {
     "@ai-writer/core": "workspace:*",
     "@ai-writer/platform": "workspace:*",
+    "@ai-writer/providers": "workspace:*",
     "@ai-writer/schemas": "workspace:*",
     "@ai-writer/ui": "workspace:*",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-http": "^2.0.0",
     "@tauri-apps/plugin-sql": "^2.0.0",
     "@tauri-apps/plugin-stronghold": "^2.0.0",
     "react": "^19.0.0",
