@@ -1,32 +1,30 @@
-import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
+import { normalizeLegacyChapterText } from "@ai-writer/core";
 import { useEffect } from "react";
 
 export interface ChapterEditorProps {
   content: string;
-  onChange?(html: string, text: string): void;
+  onChange?(content: string, plainText: string): void;
 }
 
 export function ChapterEditor({ content, onChange }: ChapterEditorProps) {
-  const editor = useEditor({
-    extensions: [StarterKit],
-    content,
-    editorProps: {
-      attributes: {
-        class: "chapter-editor__content",
-        spellcheck: "true",
-      },
-    },
-    onUpdate({ editor: currentEditor }) {
-      onChange?.(currentEditor.getHTML(), currentEditor.getText());
-    },
-  });
+  const normalizedContent = normalizeLegacyChapterText(content);
 
   useEffect(() => {
-    if (editor && editor.getHTML() !== content) {
-      editor.commands.setContent(content, false);
+    if (normalizedContent !== content) {
+      onChange?.(normalizedContent, normalizedContent);
     }
-  }, [content, editor]);
+  }, [content, normalizedContent, onChange]);
 
-  return <EditorContent editor={editor} />;
+  return (
+    <textarea
+      className="chapter-editor__content"
+      aria-label="章节正文"
+      spellCheck
+      value={normalizedContent}
+      onChange={(event) => {
+        const value = event.currentTarget.value;
+        onChange?.(value, value);
+      }}
+    />
+  );
 }
