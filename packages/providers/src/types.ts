@@ -107,6 +107,15 @@ export interface ConnectionTestResult {
   message: string;
 }
 
+export interface ProviderRuntimeService {
+  testConnection(provider: ProviderConfig): Promise<ConnectionTestResult>;
+  generate(
+    request: ProviderRuntimeRequest,
+    onEvent: (event: GenerationStreamEvent) => void,
+  ): Promise<void>;
+  cancel(taskId: string): Promise<boolean>;
+}
+
 export interface GenerateCallbacks {
   onChunk(chunk: GenerationChunk): void;
 }
