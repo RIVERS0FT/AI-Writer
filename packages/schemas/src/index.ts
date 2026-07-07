@@ -74,16 +74,12 @@ export const updateChapterMetadataInputSchema = z
 
 export const updateChapterContentInputSchema = z.object({
   chapterId: z.string().min(1),
-  contentJson: z.record(z.unknown()),
-  contentMarkdown: z.string(),
   plainText: z.string(),
   summary: z.string().max(20_000).optional(),
 });
 
 export const createChapterVersionInputSchema = z.object({
   chapterId: z.string().min(1),
-  contentJson: z.record(z.unknown()),
-  contentMarkdown: z.string(),
   plainText: z.string(),
   changeType: z.enum(["manual", "autosave", "ai_generation", "recovery"]),
   changeReason: z.string().trim().max(500).optional(),
