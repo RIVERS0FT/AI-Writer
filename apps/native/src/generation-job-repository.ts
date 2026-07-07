@@ -2,6 +2,7 @@ import type {
   GenerationJob,
   GenerationOutput,
   GenerationStatus,
+  WritingPipelineOptions,
 } from "@ai-writer/core";
 import type { GenerationJobRepository } from "@ai-writer/platform";
 import {
@@ -19,9 +20,15 @@ interface GenerationJobRow {
   task_type: GenerationJob["taskType"];
   status: GenerationStatus;
   progress: number;
+  instruction: string;
+  pipeline_version: string;
+  prompt_set_version: string;
+  options_json: string;
   input_tokens: number | null;
   output_tokens: number | null;
   retry_count: number;
+  started_at: string | null;
+  completed_at: string | null;
   error_code: string | null;
   error_message: string | null;
   created_at: string;
@@ -36,6 +43,23 @@ interface GenerationOutputRow {
   created_at: string;
 }
 
+function parseOptions(value: string): WritingPipelineOptions {
+  const defaults: WritingPipelineOptions = {
+    enablePlanning: true,
+    enableContinuityReview: true,
+    enableCharacterReview: true,
+    enableStyleReview: true,
+    enableTargetedRewrite: true,
+    enableMemoryExtraction: true,
+  };
+  try {
+    const parsed = JSON.parse(value) as Partial<WritingPipelineOptions>;
+    return { ...defaults, ...parsed };
+  } catch {
+    return defaults;
+  }
+}
+
 function mapJob(row: GenerationJobRow): GenerationJob {
   return {
     id: row.id,
@@ -43,6 +67,10 @@ function mapJob(row: GenerationJobRow): GenerationJob {
     taskType: row.task_type,
     status: row.status,
     progress: row.progress,
+    instruction: row.instruction,
+    pipelineVersion: row.pipeline_version,
+    promptSetVersion: row.prompt_set_version,
+    options: parseOptions(row.options_json),
     retryCount: row.retry_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -53,6 +81,8 @@ function mapJob(row: GenerationJobRow): GenerationJob {
     ...(row.model_profile_id ? { modelProfileId: row.model_profile_id } : {}),
     ...(row.input_tokens !== null ? { inputTokens: row.input_tokens } : {}),
     ...(row.output_tokens !== null ? { outputTokens: row.output_tokens } : {}),
+    ...(row.started_at ? { startedAt: row.started_at } : {}),
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
     ...(row.error_code ? { errorCode: row.error_code } : {}),
     ...(row.error_message ? { errorMessage: row.error_message } : {}),
   };
@@ -68,14 +98,18 @@ function mapOutput(row: GenerationOutputRow): GenerationOutput {
   };
 }
 
-async function getJob(database: Database, id: string): Promise<GenerationJob | undefined> {
+const jobColumns = `id, project_id, chapter_id, provider_config_id,
+  model_profile_id, task_type, status, progress, instruction,
+  pipeline_version, prompt_set_version, options_json, input_tokens,
+  output_tokens, retry_count, started_at, completed_at, error_code,
+  error_message, created_at, updated_at`;
+
+async function getJob(
+  database: Database,
+  id: string,
+): Promise<GenerationJob | undefined> {
   const rows = await database.select<GenerationJobRow[]>(
-    `SELECT id, project_id, chapter_id, provider_config_id, model_profile_id,
-            task_type, status, progress, input_tokens, output_tokens, retry_count,
-            error_code, error_message, created_at, updated_at
-     FROM generation_jobs
-     WHERE id = $1
-     LIMIT 1`,
+    `SELECT ${jobColumns} FROM generation_jobs WHERE id = $1 LIMIT 1`,
     [id],
   );
   return rows[0] ? mapJob(rows[0]) : undefined;
@@ -87,9 +121,7 @@ export function createGenerationJobRepository(
   return {
     async listRecent(projectId, limit = 20) {
       const rows = await database.select<GenerationJobRow[]>(
-        `SELECT id, project_id, chapter_id, provider_config_id, model_profile_id,
-                task_type, status, progress, input_tokens, output_tokens,
-                retry_count, error_code, error_message, created_at, updated_at
+        `SELECT ${jobColumns}
          FROM generation_jobs
          WHERE project_id = $1
          ORDER BY updated_at DESC
@@ -108,6 +140,10 @@ export function createGenerationJobRepository(
         taskType: parsed.taskType,
         status: "queued",
         progress: 0,
+        instruction: parsed.instruction,
+        pipelineVersion: parsed.pipelineVersion,
+        promptSetVersion: parsed.promptSetVersion,
+        options: parsed.options,
         retryCount: 0,
         createdAt: now,
         updatedAt: now,
@@ -122,8 +158,9 @@ export function createGenerationJobRepository(
       await database.execute(
         `INSERT INTO generation_jobs
           (id, project_id, chapter_id, provider_config_id, model_profile_id,
-           task_type, status, progress, retry_count, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
+           task_type, status, progress, instruction, pipeline_version,
+           prompt_set_version, options_json, retry_count, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)`,
         [
           job.id,
           job.projectId,
@@ -133,6 +170,10 @@ export function createGenerationJobRepository(
           job.taskType,
           job.status,
           job.progress,
+          job.instruction,
+          job.pipelineVersion,
+          job.promptSetVersion,
+          JSON.stringify(job.options),
           job.retryCount,
           now,
         ],
@@ -160,12 +201,10 @@ export function createGenerationJobRepository(
           : {}),
         updatedAt: new Date().toISOString(),
       };
-      if (parsed.errorCode === null) delete updated.errorCode;
-      else if (parsed.errorCode !== undefined) updated.errorCode = parsed.errorCode;
-      if (parsed.errorMessage === null) delete updated.errorMessage;
-      else if (parsed.errorMessage !== undefined) {
-        updated.errorMessage = parsed.errorMessage;
-      }
+      setNullable(updated, "startedAt", parsed.startedAt);
+      setNullable(updated, "completedAt", parsed.completedAt);
+      setNullable(updated, "errorCode", parsed.errorCode);
+      setNullable(updated, "errorMessage", parsed.errorMessage);
 
       await database.execute(
         `UPDATE generation_jobs
@@ -174,9 +213,11 @@ export function createGenerationJobRepository(
              input_tokens = $4,
              output_tokens = $5,
              retry_count = $6,
-             error_code = $7,
-             error_message = $8,
-             updated_at = $9
+             started_at = $7,
+             completed_at = $8,
+             error_code = $9,
+             error_message = $10,
+             updated_at = $11
          WHERE id = $1`,
         [
           id,
@@ -185,6 +226,8 @@ export function createGenerationJobRepository(
           updated.inputTokens ?? null,
           updated.outputTokens ?? null,
           updated.retryCount,
+          updated.startedAt ?? null,
+          updated.completedAt ?? null,
           updated.errorCode ?? null,
           updated.errorMessage ?? null,
           updated.updatedAt,
@@ -239,6 +282,7 @@ export function createGenerationJobRepository(
         `UPDATE generation_jobs
          SET status = 'failed',
              progress = 1,
+             completed_at = $2,
              error_code = 'app_restarted',
              error_message = '应用关闭时任务仍在运行，已保留现有输出。',
              updated_at = $2
@@ -252,4 +296,13 @@ export function createGenerationJobRepository(
       return result.rowsAffected;
     },
   };
+}
+
+function setNullable<T extends object, K extends keyof T>(
+  target: T,
+  key: K,
+  value: T[K] | null | undefined,
+): void {
+  if (value === null) delete (target as Partial<T>)[key];
+  else if (value !== undefined) target[key] = value;
 }
