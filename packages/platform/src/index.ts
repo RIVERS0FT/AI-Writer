@@ -6,8 +6,11 @@ import type {
   GenerationOutput,
   NovelProject,
   OutlineNode,
+  TokenUsageRecord,
+  UsageSummary,
   Volume,
   WorldEntry,
+  WritingStep,
 } from "@ai-writer/core";
 import type {
   ConnectionTestResult,
@@ -25,6 +28,8 @@ import type {
   CreateProjectInput,
   CreateVolumeInput,
   CreateWorldEntryInput,
+  CreateWritingStepInput,
+  RecordTokenUsageInput,
   UpdateChapterContentInput,
   UpdateChapterMetadataInput,
   UpdateCharacterInput,
@@ -32,6 +37,7 @@ import type {
   UpdateOutlineNodeInput,
   UpdateVolumeInput,
   UpdateWorldEntryInput,
+  UpdateWritingStepInput,
 } from "@ai-writer/schemas";
 
 export interface RuntimeInfo {
@@ -89,6 +95,21 @@ export interface GenerationJobRepository {
   markInterrupted(projectId: string): Promise<number>;
 }
 
+export interface WritingRepository {
+  listSteps(jobId: string): Promise<WritingStep[]>;
+  createStep(input: CreateWritingStepInput): Promise<WritingStep>;
+  updateStep(id: string, input: UpdateWritingStepInput): Promise<WritingStep>;
+}
+
+export interface UsageRepository {
+  recordRequest(input: RecordTokenUsageInput): Promise<TokenUsageRecord>;
+  listForJob(jobId: string): Promise<TokenUsageRecord[]>;
+  summarizeTask(jobId: string): Promise<UsageSummary>;
+  summarizeChapter(chapterId: string): Promise<UsageSummary>;
+  summarizeProject(projectId: string): Promise<UsageSummary>;
+  summarizeModel(modelProfileId: string): Promise<UsageSummary>;
+}
+
 export interface ProviderRepository {
   listProviders(): Promise<ProviderConfig[]>;
   saveProvider(config: ProviderConfig): Promise<ProviderConfig>;
@@ -121,6 +142,8 @@ export interface PlatformService {
   contents: ContentRepository;
   knowledge?: KnowledgeRepository | undefined;
   generationJobs: GenerationJobRepository;
+  writing: WritingRepository;
+  usage: UsageRepository;
   providers: ProviderRepository;
   secureStorage: SecureStorageService;
   providerRuntime: ProviderRuntimeService;
