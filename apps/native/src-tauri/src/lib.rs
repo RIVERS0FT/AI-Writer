@@ -44,6 +44,12 @@ pub fn run() {
             sql: include_str!("../migrations/0003_plain_text_only.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "writing_pipeline_usage",
+            sql: include_str!("../migrations/0004_writing_pipeline_usage.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
