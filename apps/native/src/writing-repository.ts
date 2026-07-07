@@ -209,6 +209,6 @@ function setNullable<T extends object, K extends keyof T>(
   key: K,
   value: T[K] | null | undefined,
 ): void {
-  if (value === null) delete target[key];
+  if (value === null) delete (target as Partial<T>)[key];
   else if (value !== undefined) target[key] = value;
 }
