@@ -1,3 +1,5 @@
+export * from "./writing";
+
 export interface ChapterPromptInput {
   chapterTitle: string;
   chapterGoal: string;
