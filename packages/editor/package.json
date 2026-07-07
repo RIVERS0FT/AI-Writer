@@ -1,6 +1,6 @@
 {
   "name": "@ai-writer/editor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -12,8 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@tiptap/react": "^2.12.0",
-    "@tiptap/starter-kit": "^2.12.0",
+    "@ai-writer/core": "workspace:*",
     "react": "^19.0.0"
   },
   "devDependencies": {

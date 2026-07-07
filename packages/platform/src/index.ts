@@ -1,10 +1,13 @@
 import type {
   Chapter,
   ChapterVersion,
+  Character,
   GenerationJob,
   GenerationOutput,
   NovelProject,
+  OutlineNode,
   Volume,
+  WorldEntry,
 } from "@ai-writer/core";
 import type {
   ConnectionTestResult,
@@ -16,13 +19,19 @@ import type {
 import type {
   CreateChapterInput,
   CreateChapterVersionInput,
+  CreateCharacterInput,
   CreateGenerationJobInput,
+  CreateOutlineNodeInput,
   CreateProjectInput,
   CreateVolumeInput,
+  CreateWorldEntryInput,
   UpdateChapterContentInput,
   UpdateChapterMetadataInput,
+  UpdateCharacterInput,
   UpdateGenerationJobInput,
+  UpdateOutlineNodeInput,
   UpdateVolumeInput,
+  UpdateWorldEntryInput,
 } from "@ai-writer/schemas";
 
 export interface RuntimeInfo {
@@ -54,6 +63,21 @@ export interface ContentRepository {
   createChapterVersion(input: CreateChapterVersionInput): Promise<ChapterVersion>;
   listChapterVersions(chapterId: string): Promise<ChapterVersion[]>;
   restoreChapterVersion(versionId: string): Promise<Chapter>;
+}
+
+export interface KnowledgeRepository {
+  listCharacters(projectId: string): Promise<Character[]>;
+  createCharacter(input: CreateCharacterInput): Promise<Character>;
+  updateCharacter(input: UpdateCharacterInput): Promise<Character>;
+  deleteCharacter(id: string): Promise<void>;
+  listWorldEntries(projectId: string): Promise<WorldEntry[]>;
+  createWorldEntry(input: CreateWorldEntryInput): Promise<WorldEntry>;
+  updateWorldEntry(input: UpdateWorldEntryInput): Promise<WorldEntry>;
+  deleteWorldEntry(id: string): Promise<void>;
+  listOutlineNodes(projectId: string): Promise<OutlineNode[]>;
+  createOutlineNode(input: CreateOutlineNodeInput): Promise<OutlineNode>;
+  updateOutlineNode(input: UpdateOutlineNodeInput): Promise<OutlineNode>;
+  deleteOutlineNode(id: string): Promise<void>;
 }
 
 export interface GenerationJobRepository {
@@ -95,6 +119,7 @@ export interface PlatformService {
   runtime: RuntimeInfo;
   projects: ProjectRepository;
   contents: ContentRepository;
+  knowledge?: KnowledgeRepository | undefined;
   generationJobs: GenerationJobRepository;
   providers: ProviderRepository;
   secureStorage: SecureStorageService;

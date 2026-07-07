@@ -89,6 +89,57 @@ export const createChapterVersionInputSchema = z.object({
   changeReason: z.string().trim().max(500).optional(),
 });
 
+export const createCharacterInputSchema = z.object({
+  projectId: z.string().min(1),
+  name: z.string().trim().min(1).max(200),
+  aliases: z.array(z.string().trim().min(1).max(100)).default([]),
+  profile: z.string().trim().max(30_000).default(""),
+  motivation: z.string().trim().max(10_000).default(""),
+  currentState: z.string().trim().max(10_000).default(""),
+  isLocked: z.boolean().default(false),
+});
+
+export const updateCharacterInputSchema = createCharacterInputSchema
+  .omit({ projectId: true })
+  .partial()
+  .extend({ id: z.string().min(1) });
+
+export const createWorldEntryInputSchema = z.object({
+  projectId: z.string().min(1),
+  entryType: z.string().trim().min(1).max(100),
+  title: z.string().trim().min(1).max(200),
+  content: z.string().trim().max(50_000).default(""),
+  isLocked: z.boolean().default(false),
+});
+
+export const updateWorldEntryInputSchema = createWorldEntryInputSchema
+  .omit({ projectId: true })
+  .partial()
+  .extend({ id: z.string().min(1) });
+
+export const outlineNodeTypeSchema = z.enum([
+  "story",
+  "volume",
+  "chapter",
+  "scene",
+  "note",
+]);
+
+export const createOutlineNodeInputSchema = z.object({
+  projectId: z.string().min(1),
+  parentId: z.string().min(1).optional(),
+  nodeType: outlineNodeTypeSchema,
+  title: z.string().trim().min(1).max(200),
+  content: z.string().trim().max(50_000).default(""),
+  order: z.number().int().min(0).optional(),
+  isLocked: z.boolean().default(false),
+});
+
+export const updateOutlineNodeInputSchema = createOutlineNodeInputSchema
+  .omit({ projectId: true })
+  .partial()
+  .extend({ id: z.string().min(1) });
+
 export const generationStatusSchema = z.enum([
   "queued",
   "building_context",
@@ -162,18 +213,14 @@ export type CreateProjectInput = z.infer<typeof createProjectInputSchema>;
 export type CreateVolumeInput = z.infer<typeof createVolumeInputSchema>;
 export type UpdateVolumeInput = z.infer<typeof updateVolumeInputSchema>;
 export type CreateChapterInput = z.infer<typeof createChapterInputSchema>;
-export type UpdateChapterMetadataInput = z.infer<
-  typeof updateChapterMetadataInputSchema
->;
-export type UpdateChapterContentInput = z.infer<
-  typeof updateChapterContentInputSchema
->;
-export type CreateChapterVersionInput = z.infer<
-  typeof createChapterVersionInputSchema
->;
-export type CreateGenerationJobInput = z.infer<
-  typeof createGenerationJobInputSchema
->;
-export type UpdateGenerationJobInput = z.infer<
-  typeof updateGenerationJobInputSchema
->;
+export type UpdateChapterMetadataInput = z.infer<typeof updateChapterMetadataInputSchema>;
+export type UpdateChapterContentInput = z.infer<typeof updateChapterContentInputSchema>;
+export type CreateChapterVersionInput = z.infer<typeof createChapterVersionInputSchema>;
+export type CreateCharacterInput = z.infer<typeof createCharacterInputSchema>;
+export type UpdateCharacterInput = z.infer<typeof updateCharacterInputSchema>;
+export type CreateWorldEntryInput = z.infer<typeof createWorldEntryInputSchema>;
+export type UpdateWorldEntryInput = z.infer<typeof updateWorldEntryInputSchema>;
+export type CreateOutlineNodeInput = z.infer<typeof createOutlineNodeInputSchema>;
+export type UpdateOutlineNodeInput = z.infer<typeof updateOutlineNodeInputSchema>;
+export type CreateGenerationJobInput = z.infer<typeof createGenerationJobInputSchema>;
+export type UpdateGenerationJobInput = z.infer<typeof updateGenerationJobInputSchema>;

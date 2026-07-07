@@ -14,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
 import { createContentRepository } from "./content-repository";
 import { createGenerationJobRepository } from "./generation-job-repository";
+import { createKnowledgeRepository } from "./knowledge-repository";
 import { createProviderRepository } from "./provider-repository";
 
 interface ProjectRow {
@@ -103,6 +104,7 @@ export async function createNativePlatform(
     runtime,
     projects,
     contents: createContentRepository(database),
+    knowledge: createKnowledgeRepository(database),
     generationJobs: createGenerationJobRepository(database),
     providers: createProviderRepository(database),
     secureStorage: dependencies.secureStorage,

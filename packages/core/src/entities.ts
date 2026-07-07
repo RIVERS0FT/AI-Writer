@@ -53,9 +53,39 @@ export interface Character {
   id: string;
   projectId: string;
   name: string;
+  aliases: string[];
   profile: string;
   motivation: string;
   currentState: string;
+  isLocked: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorldEntry {
+  id: string;
+  projectId: string;
+  entryType: string;
+  title: string;
+  content: string;
+  isLocked: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type OutlineNodeType = "story" | "volume" | "chapter" | "scene" | "note";
+
+export interface OutlineNode {
+  id: string;
+  projectId: string;
+  parentId?: string | undefined;
+  nodeType: OutlineNodeType;
+  title: string;
+  content: string;
+  order: number;
+  isLocked: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type GenerationStatus =
