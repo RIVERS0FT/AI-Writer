@@ -1,4 +1,11 @@
-import type { NovelProject } from "@ai-writer/core";
+import type {
+  Chapter,
+  ChapterVersion,
+  GenerationJob,
+  GenerationOutput,
+  NovelProject,
+  Volume,
+} from "@ai-writer/core";
 import type {
   ConnectionTestResult,
   GenerationStreamEvent,
@@ -6,7 +13,15 @@ import type {
   ProviderConfig,
   ProviderRuntimeRequest,
 } from "@ai-writer/providers";
-import type { CreateProjectInput } from "@ai-writer/schemas";
+import type {
+  CreateChapterInput,
+  CreateChapterVersionInput,
+  CreateGenerationJobInput,
+  CreateProjectInput,
+  CreateVolumeInput,
+  UpdateChapterContentInput,
+  UpdateGenerationJobInput,
+} from "@ai-writer/schemas";
 
 export interface RuntimeInfo {
   name: string;
@@ -19,6 +34,26 @@ export interface RuntimeInfo {
 export interface ProjectRepository {
   list(): Promise<NovelProject[]>;
   create(input: CreateProjectInput): Promise<NovelProject>;
+}
+
+export interface ContentRepository {
+  listVolumes(projectId: string): Promise<Volume[]>;
+  createVolume(input: CreateVolumeInput): Promise<Volume>;
+  listChapters(projectId: string): Promise<Chapter[]>;
+  getChapter(id: string): Promise<Chapter | undefined>;
+  createChapter(input: CreateChapterInput): Promise<Chapter>;
+  saveChapterContent(input: UpdateChapterContentInput): Promise<Chapter>;
+  createChapterVersion(input: CreateChapterVersionInput): Promise<ChapterVersion>;
+  listChapterVersions(chapterId: string): Promise<ChapterVersion[]>;
+}
+
+export interface GenerationJobRepository {
+  listRecent(projectId: string, limit?: number): Promise<GenerationJob[]>;
+  create(input: CreateGenerationJobInput): Promise<GenerationJob>;
+  update(id: string, input: UpdateGenerationJobInput): Promise<GenerationJob>;
+  replaceOutput(jobId: string, content: string): Promise<GenerationOutput>;
+  getOutput(jobId: string): Promise<GenerationOutput | undefined>;
+  markInterrupted(projectId: string): Promise<number>;
 }
 
 export interface ProviderRepository {
@@ -50,6 +85,8 @@ export interface ProviderRuntimeService {
 export interface PlatformService {
   runtime: RuntimeInfo;
   projects: ProjectRepository;
+  contents: ContentRepository;
+  generationJobs: GenerationJobRepository;
   providers: ProviderRepository;
   secureStorage: SecureStorageService;
   providerRuntime: ProviderRuntimeService;

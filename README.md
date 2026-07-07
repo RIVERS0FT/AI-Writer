@@ -4,7 +4,7 @@ AI-Writer 是一个本地优先的跨平台 AI 小说创作应用。用户配置
 
 ## 当前实现状态
 
-当前仓库已完成基础骨架和 Provider 运行时的首个闭环：
+当前仓库已完成基础骨架、Provider 运行时，以及小说内容持久化的首个闭环：
 
 - pnpm workspace + Turborepo 单仓库结构
 - React + TypeScript + Vite 桌面端和 Web 端入口
@@ -12,11 +12,14 @@ AI-Writer 是一个本地优先的跨平台 AI 小说创作应用。用户配置
 - SQLite 插件、初始迁移和项目仓储
 - Stronghold 密钥库及 API Key 保存
 - Provider 与模型档案配置页面
-- OpenAI Compatible 连接测试
-- Tauri HTTP Client 流式生成
-- 生成取消、实时预览和 Token 用量显示
+- OpenAI Compatible 连接测试和流式生成
+- 卷、章节创建与章节切换
+- 章节 900ms 防抖自动保存
+- 手动章节版本快照
+- 生成任务状态、Token 和输出持久化
+- 中断任务识别与生成输出恢复
 - Provider、Prompt、记忆、RAG、平台抽象接口
-- Tiptap 章节编辑器骨架
+- Tiptap 章节编辑器
 - 响应式三栏工作台
 - Vitest 基础测试和 GitHub Actions CI
 
@@ -30,10 +33,10 @@ apps/
 └── web/           React PWA/Web 入口
 
 packages/
-├── core/          小说领域模型和工作流
+├── core/          小说领域模型、内容工具和工作流
 ├── editor/        富文本编辑器
 ├── memory/        记忆与 RAG 核心
-├── platform/      平台能力抽象
+├── platform/      平台能力与仓储抽象
 ├── prompts/       Prompt 构建
 ├── providers/     模型 Provider 与流解析
 ├── schemas/       Zod 数据校验
@@ -63,6 +66,16 @@ pnpm typecheck
 pnpm test
 pnpm build
 ```
+
+## 内容与任务持久化
+
+创建小说项目时会同时创建默认卷和第一章。编辑器内容会在停止输入 900ms 后保存：
+
+- 原生端保存到 SQLite
+- Web 端保存到 `localStorage`
+- “保存版本”会写入独立的章节版本快照
+- AI 生成任务会保存状态、Token、错误和输出
+- 应用重启后，未结束任务会标记为中断，已有输出仍可恢复
 
 ## Provider 配置
 

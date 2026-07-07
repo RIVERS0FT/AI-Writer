@@ -23,6 +23,8 @@ import type {
   ProviderRuntimeService,
   SecureStorageService,
 } from "./index";
+import { createWebContentRepository } from "./web-content";
+import { createWebGenerationJobRepository } from "./web-generation-jobs";
 
 const projectsStorageKey = "ai-writer.projects.v1";
 const providersStorageKey = "ai-writer.providers.v1";
@@ -144,7 +146,9 @@ const secureStorage: SecureStorageService = {
 
   async getSecret(key) {
     if (!webVaultUnlocked) throw new Error("密钥库尚未解锁");
-    return globalThis.sessionStorage?.getItem(`${secretsStoragePrefix}${key}`) ?? null;
+    return (
+      globalThis.sessionStorage?.getItem(`${secretsStoragePrefix}${key}`) ?? null
+    );
   },
 
   async removeSecret(key) {
@@ -153,141 +157,166 @@ const secureStorage: SecureStorageService = {
   },
 };
 
-function headersFor(provider: ProviderConfig, apiKey: string): Headers {
+function headersFor(provider: ProviderConfig, credential: string): Headers {
   const headers = new Headers({ "Content-Type": "application/json" });
-  if (apiKey.trim()) headers.set("Authorization", `Bearer ${apiKey.trim()}`);
+  if (credential.trim()) {
+    headers.set("Authorization", `Bearer ${credential.trim()}`);
+  }
   for (const [key, value] of Object.entries(provider.customHeaders ?? {})) {
     headers.set(key, value);
   }
   return headers;
 }
 
-function createProviderRuntime(secureStorage: SecureStorageService): ProviderRuntimeService {
+function createProviderRuntime(
+  secretStore: SecureStorageService,
+): ProviderRuntimeService {
   const abortControllers = new Map<string, AbortController>();
 
   async function credentialFor(provider: ProviderConfig): Promise<string> {
     if (!provider.apiKeyRef) throw new Error("Provider 没有密钥引用");
-    const credential = await secureStorage.getSecret(provider.apiKeyRef);
+    const credential = await secretStore.getSecret(provider.apiKeyRef);
     if (!credential) throw new Error("会话密钥库中没有找到 Provider 凭据");
     return credential;
   }
 
   return {
-  async testConnection(provider): Promise<ConnectionTestResult> {
-    const startedAt = performance.now();
-    try {
-      const apiKey = await credentialFor(provider);
-      const response = await fetch(resolveModelsUrl(provider), {
-        method: "GET",
-        headers: headersFor(provider, apiKey),
-      });
-      const latencyMs = Math.round(performance.now() - startedAt);
-      return {
-        ok: response.ok,
-        latencyMs,
-        message: response.ok
-          ? `连接成功（HTTP ${response.status}）`
-          : `连接失败（HTTP ${response.status}）`,
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        latencyMs: Math.round(performance.now() - startedAt),
-        message: error instanceof Error ? error.message : String(error),
-      };
-    }
-  },
-
-  async generate(request, onEvent) {
-    const controller = new AbortController();
-    abortControllers.set(request.taskId, controller);
-    onEvent({ event: "started", data: { taskId: request.taskId } });
-
-    try {
-      const apiKey = await credentialFor(request.provider);
-      const response = await fetch(resolveChatCompletionsUrl(request.provider), {
-        method: "POST",
-        headers: headersFor(request.provider, apiKey),
-        body: JSON.stringify(buildOpenAICompatiblePayload(request)),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const detail = (await response.text()).slice(0, 800);
-        throw new Error(`HTTP ${response.status}: ${detail || response.statusText}`);
+    async testConnection(provider): Promise<ConnectionTestResult> {
+      const startedAt = performance.now();
+      try {
+        const credential = await credentialFor(provider);
+        const response = await fetch(resolveModelsUrl(provider), {
+          method: "GET",
+          headers: headersFor(provider, credential),
+        });
+        const latencyMs = Math.round(performance.now() - startedAt);
+        return {
+          ok: response.ok,
+          latencyMs,
+          message: response.ok
+            ? `连接成功（HTTP ${response.status}）`
+            : `连接失败（HTTP ${response.status}）`,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          latencyMs: Math.round(performance.now() - startedAt),
+          message: error instanceof Error ? error.message : String(error),
+        };
       }
-      if (!response.body) throw new Error("模型服务没有返回流式响应");
+    },
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let inputTokens: number | undefined;
-      let outputTokens: number | undefined;
+    async generate(
+      request: ProviderRuntimeRequest,
+      onEvent: (event: GenerationStreamEvent) => void,
+    ) {
+      const controller = new AbortController();
+      abortControllers.set(request.taskId, controller);
+      onEvent({ event: "started", data: { taskId: request.taskId } });
 
-      while (true) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
+      try {
+        const credential = await credentialFor(request.provider);
+        const response = await fetch(
+          resolveChatCompletionsUrl(request.provider),
+          {
+            method: "POST",
+            headers: headersFor(request.provider, credential),
+            body: JSON.stringify(buildOpenAICompatiblePayload(request)),
+            signal: controller.signal,
+          },
+        );
 
-        let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex >= 0) {
-          const rawLine = buffer.slice(0, newlineIndex).replace(/\r$/, "");
-          buffer = buffer.slice(newlineIndex + 1);
-          newlineIndex = buffer.indexOf("\n");
+        if (!response.ok) {
+          const detail = (await response.text()).slice(0, 800);
+          throw new Error(
+            `HTTP ${response.status}: ${detail || response.statusText}`,
+          );
+        }
+        if (!response.body) throw new Error("模型服务没有返回流式响应");
 
-          if (!rawLine.startsWith("data:")) continue;
-          const parsed = parseOpenAICompatibleSseData(rawLine.slice(5));
-          if (!parsed) continue;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let inputTokens: number | undefined;
+        let outputTokens: number | undefined;
 
-          if (parsed.inputTokens !== undefined) inputTokens = parsed.inputTokens;
-          if (parsed.outputTokens !== undefined) outputTokens = parsed.outputTokens;
-          if (parsed.text) {
-            onEvent({
-              event: "chunk",
-              data: { taskId: request.taskId, text: parsed.text },
-            });
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+
+          let newlineIndex = buffer.indexOf("\n");
+          while (newlineIndex >= 0) {
+            const rawLine = buffer
+              .slice(0, newlineIndex)
+              .replace(/\r$/, "");
+            buffer = buffer.slice(newlineIndex + 1);
+            newlineIndex = buffer.indexOf("\n");
+
+            if (!rawLine.startsWith("data:")) continue;
+            const parsed = parseOpenAICompatibleSseData(rawLine.slice(5));
+            if (!parsed) continue;
+
+            if (parsed.inputTokens !== undefined) {
+              inputTokens = parsed.inputTokens;
+            }
+            if (parsed.outputTokens !== undefined) {
+              outputTokens = parsed.outputTokens;
+            }
+            if (parsed.text) {
+              onEvent({
+                event: "chunk",
+                data: { taskId: request.taskId, text: parsed.text },
+              });
+            }
           }
-          if (parsed.done) break;
+
+          if (done) break;
         }
 
-        if (done) break;
+        const data: Extract<
+          GenerationStreamEvent,
+          { event: "finished" }
+        >["data"] = {
+          taskId: request.taskId,
+        };
+        if (inputTokens !== undefined) data.inputTokens = inputTokens;
+        if (outputTokens !== undefined) data.outputTokens = outputTokens;
+        onEvent({ event: "finished", data });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        onEvent({
+          event: "error",
+          data: { taskId: request.taskId, message },
+        });
+        throw error;
+      } finally {
+        abortControllers.delete(request.taskId);
       }
+    },
 
-      const finishedData: Extract<GenerationStreamEvent, { event: "finished" }>["data"] = {
-        taskId: request.taskId,
-      };
-      if (inputTokens !== undefined) finishedData.inputTokens = inputTokens;
-      if (outputTokens !== undefined) finishedData.outputTokens = outputTokens;
-      onEvent({ event: "finished", data: finishedData });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      onEvent({ event: "error", data: { taskId: request.taskId, message } });
-      throw error;
-    } finally {
-      abortControllers.delete(request.taskId);
-    }
-  },
-
-  async cancel(taskId) {
-    const controller = abortControllers.get(taskId);
-    if (!controller) return false;
-    controller.abort();
-    return true;
-  },
+    async cancel(taskId) {
+      const controller = abortControllers.get(taskId);
+      if (!controller) return false;
+      controller.abort();
+      return true;
+    },
   };
 }
 
 export function createWebPlatform(): PlatformService {
-  const runtime = createProviderRuntime(secureStorage);
+  const providerRuntime = createProviderRuntime(secureStorage);
   return {
     runtime: {
       name: "AI-Writer Web",
-      version: "0.2.0",
+      version: "0.3.0",
       platform: "web",
       os: navigator.platform || "browser",
     },
     projects: projectRepository,
+    contents: createWebContentRepository(),
+    generationJobs: createWebGenerationJobRepository(),
     providers: providerRepository,
     secureStorage,
-    providerRuntime: runtime,
+    providerRuntime,
   };
 }
