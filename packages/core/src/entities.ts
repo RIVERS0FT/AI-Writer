@@ -11,19 +11,42 @@ export interface NovelProject {
   updatedAt: string;
 }
 
+export interface Volume {
+  id: string;
+  projectId: string;
+  title: string;
+  summary: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Chapter {
   id: string;
   projectId: string;
-  volumeId?: string;
+  volumeId?: string | undefined;
   title: string;
   order: number;
   status: ChapterStatus;
   contentJson: Record<string, unknown>;
   contentMarkdown: string;
   plainText: string;
-  summary?: string;
+  summary?: string | undefined;
+  contentHash: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ChapterVersion {
+  id: string;
+  chapterId: string;
+  version: number;
+  contentJson: Record<string, unknown>;
+  contentMarkdown: string;
+  plainText: string;
+  changeType: "manual" | "autosave" | "ai_generation" | "recovery";
+  changeReason?: string | undefined;
+  createdAt: string;
 }
 
 export interface Character {
@@ -47,14 +70,35 @@ export type GenerationStatus =
   | "failed"
   | "cancelled";
 
+export type GenerationTaskType =
+  | "chapter_continuation"
+  | "scene_generation"
+  | "rewrite"
+  | "expand"
+  | "consistency_check";
+
 export interface GenerationJob {
   id: string;
   projectId: string;
-  chapterId?: string;
+  chapterId?: string | undefined;
+  providerConfigId?: string | undefined;
+  modelProfileId?: string | undefined;
+  taskType: GenerationTaskType;
   status: GenerationStatus;
   progress: number;
+  inputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+  retryCount: number;
   createdAt: string;
   updatedAt: string;
-  errorCode?: string;
-  errorMessage?: string;
+  errorCode?: string | undefined;
+  errorMessage?: string | undefined;
+}
+
+export interface GenerationOutput {
+  id: string;
+  jobId: string;
+  outputType: "draft" | "plan" | "review";
+  content: string;
+  createdAt: string;
 }

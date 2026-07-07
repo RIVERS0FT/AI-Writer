@@ -6,9 +6,14 @@ import type {
   RuntimeInfo,
   SecureStorageService,
 } from "@ai-writer/platform";
-import { createProjectInputSchema, type CreateProjectInput } from "@ai-writer/schemas";
+import {
+  createProjectInputSchema,
+  type CreateProjectInput,
+} from "@ai-writer/schemas";
 import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
+import { createContentRepository } from "./content-repository";
+import { createGenerationJobRepository } from "./generation-job-repository";
 import { createProviderRepository } from "./provider-repository";
 
 interface ProjectRow {
@@ -97,6 +102,8 @@ export async function createNativePlatform(
   return {
     runtime,
     projects,
+    contents: createContentRepository(database),
+    generationJobs: createGenerationJobRepository(database),
     providers: createProviderRepository(database),
     secureStorage: dependencies.secureStorage,
     providerRuntime: dependencies.providerRuntime,
