@@ -2,9 +2,9 @@ export interface ProviderConfig {
   id: string;
   name: string;
   providerType: string;
-  baseUrl?: string;
-  apiKeyRef?: string;
-  customHeaders?: Record<string, string>;
+  baseUrl?: string | undefined;
+  apiKeyRef?: string | undefined;
+  customHeaders?: Record<string, string> | undefined;
 }
 
 export interface ModelProfile {
@@ -13,9 +13,9 @@ export interface ModelProfile {
   name: string;
   model: string;
   temperature: number;
-  topP?: number;
-  maxOutputTokens?: number;
-  contextWindow?: number;
+  topP?: number | undefined;
+  maxOutputTokens?: number | undefined;
+  contextWindow?: number | undefined;
   timeoutMs: number;
   maxRetries: number;
 }
