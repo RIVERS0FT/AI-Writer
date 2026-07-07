@@ -5,6 +5,7 @@ export type WritingTaskType =
   | "rewrite"
   | "expand"
   | "shorten"
+  | "consistency_check"
   | "consistency_fix";
 
 export interface WritingPipelineOptions {
