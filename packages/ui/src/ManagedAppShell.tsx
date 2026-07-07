@@ -7,6 +7,7 @@ import { AppShell as LegacyAppShell } from "./AppShell";
 import { ContentManager } from "./ContentManager";
 import { KnowledgeLibrary } from "./KnowledgeLibraryWithStyles";
 import { createRetryingPlatform } from "./retrying-platform";
+import { WritingInsights } from "./WritingInsightsWithStyles";
 import "./stage4.css";
 
 export interface ManagedAppShellProps {
@@ -31,6 +32,7 @@ export function ManagedAppShell({ platform }: ManagedAppShellProps) {
         onChanged={() => setRevision((current) => current + 1)}
       />
       <KnowledgeLibrary platform={writingPlatform} />
+      <WritingInsights platform={writingPlatform} />
     </>
   );
 }
